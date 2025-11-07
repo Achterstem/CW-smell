@@ -2,7 +2,7 @@
 // @name         Эпоха
 // @namespace    http://tampermonkey.net/
 // @version      2025-11-06
-// @description  try to take over the world!
+// @description  Меняет запах определелённым должностям внутри Эпохи.
 // @author       Fraudhart
 // @match        http*://*.catwar.net/*
 // @match        http*://*.catwar.su/*
