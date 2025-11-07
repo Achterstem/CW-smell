@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Эпоха
+// @name         CW-smell
 // @namespace    http://tampermonkey.net/
 // @version      2025-11-06
 // @description  try to take over the world!
