@@ -1,14 +1,15 @@
-// ==UserScript==
-// @name         Эпоха
-// @namespace    http://tampermonkey.net/
-// @version      2025-11-06
-// @description  Меняет запах определелённым должностям внутри Эпохи.
-// @author       Fraudhart
-// @match        http*://*.catwar.net/*
-// @match        http*://*.catwar.su/*
-// @icon         https://www.google.com/s2/favicons?sz=64&domain=catwar.su
-// @grant        none
-// ==/UserScript==
+    // ==UserScript==
+    // @name         CW-smell
+    // @namespace    http://tampermonkey.net/
+    // @version      1.3.2
+    // @description  обновление запаха.
+    // @author       achterstem
+    // @match        https://catwar.su/cw3
+    // @match        https://catwar.net/cw3
+    // @icon         https://www.google.com/s2/favicons?sz=64&domain=catwar.su
+    // @license      MIT
+    // @grant        none
+    // ==/UserScript==
 
 
 (() => {
