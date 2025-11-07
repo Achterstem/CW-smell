@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name CW-smell
 // @namespace http://tampermonkey.net/
-// @version 1.4.6
+// @version 1.0.0
 // @description Меняет запахи.
 // @author achterstem
 // @match http*://*.catwar.net/*
@@ -13,6 +13,9 @@
 // @grant GM_deleteValue
 // @grant GM_listValues
 // @run-at document-idle
+// @homepageURL https://openuserjs.org/scripts/Achterstem/CW-smell
+// @downloadURL https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
+// @updateURL https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // ==/UserScript==
 
 (function() {
