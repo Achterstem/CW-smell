@@ -14,7 +14,7 @@
 // @grant GM_listValues
 // @run-at document-idle
 // @homepageURL https://openuserjs.org/scripts/Achterstem/CW-smell
-// @downloadURL https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
+// @downloadURL https://github.com/Achterstem/CW-smell
 // @updateURL https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // ==/UserScript==
 
