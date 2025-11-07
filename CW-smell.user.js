@@ -22,11 +22,11 @@
     'use strict';
 
     const STORAGE_KEY = 'CUSTOM_ODORS_DATA';
-    const OLD_ODOR = 'odoroj/403.png';
+    const OLD_ODOR = 'odoroj/232.png';
     const OLD_ODOR_NAME = OLD_ODOR.split('/').pop();
 
     const DEFAULT_PHRASES_TO_IMAGES = [
-        ['Последователь-идальго', 'https://i.yapx.ru/cEnIO.png'],
+        ['Погасшесолнышко', 'https://i.yapx.ru/cEnIO.png'],
     ];
 
     const loadData = async () => {
