@@ -15,6 +15,7 @@
 // @run-at document-idle
 // @homepageURL https://openuserjs.org/scripts/Achterstem/CW-smell
 // @downloadURL https://github.com/Achterstem/CW-smell
+// @downloadURL https://greasyfork.org/ru/scripts/555104-cw-smell
 // @updateURL https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // ==/UserScript==
 
