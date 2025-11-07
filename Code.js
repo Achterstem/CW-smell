@@ -99,4 +99,4 @@
             attributes: true
         }
     );
-}());
+})();
