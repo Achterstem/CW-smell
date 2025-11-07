@@ -11,7 +11,6 @@
     // @grant        none
     // ==/UserScript==
 
-
 (() => {
     // ССЫЛКА НА ЗАПАХ ЭПОХИ
     const OLD_ODOR = 'odoroj/403.png';
@@ -100,4 +99,4 @@
             attributes: true
         }
     );
-})();
+}());
