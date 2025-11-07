@@ -7,6 +7,7 @@
 // @match        http*://*.catwar.net/*
 // @match        http*://*.catwar.su/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=catwar.su
+// @license      MIT
 // @grant        none
 // ==/UserScript==
 
