@@ -21,17 +21,17 @@
 (function() {
     'use strict';
 
-    const STORAGE_KEY = 'CUSTOM_ODORS_DATA';
-    const OLD_ODOR = 'odoroj/232.png';
-    const OLD_ODOR_NAME = OLD_ODOR.split('/').pop();
+    const STORAGE_KEY = 'CUSTOM_SMELLS_DATA';
+    const OLD_SMELL = 'odoroj/403.png';
+    const OLD_SMELL_NAME = OLD_SMELL.split('/').pop();
 
-    const DEFAULT_PHRASES_TO_IMAGES = [
-        ['Погасшесолнышко', 'https://i.yapx.ru/cEnIO.png'],
+    const TEXT_TO_IMAGE = [
+        ['Чёрт, Фраудхарт', 'https://i.yapx.ru/cEnIO.png'],
     ];
 
     const loadData = async () => {
         const storedData = await GM_getValue(STORAGE_KEY);
-        return storedData ? JSON.parse(storedData) : DEFAULT_PHRASES_TO_IMAGES;
+        return storedData ? JSON.parse(storedData) : TEXT_TO_IMAGE;
     };
 
     const saveData = async (data) => {
@@ -39,11 +39,11 @@
         alert("Запахи сохранены!");
     };
 
-    const getCustomOdorNames = (phrasesToImages) => {
+    const getcustomSmellsNames = (phrasesToImages) => {
         const names = new Set(
             phrasesToImages.map(([, img]) => img.split('/').pop())
         );
-        names.add(OLD_ODOR_NAME);
+        names.add(OLD_SMELL_NAME);
         return names;
     };
 
@@ -75,9 +75,9 @@
         return null;
     };
 
-    const runOdorLogic = async () => {
+    const runSmell = async () => {
         const phrasesToImages = await loadData();
-        const customOdorNames = getCustomOdorNames(phrasesToImages);
+        const customSmellsNames = getcustomSmellsNames(phrasesToImages);
 
         const update = () => {
             document.querySelectorAll('.cage').forEach(cage => {
@@ -85,14 +85,14 @@
                 const img = cage.querySelector('img[src*="odoroj/"]');
 
                 if (img) {
-                    const currentImgSrcFileName = img.src.split('/').pop();
-                    const isCustomOdor = customOdorNames.has(currentImgSrcFileName);
+                    const currentSrc = img.src.split('/').pop();
+                    const isCustomSmell = customSmellsNames.has(currentSrc);
 
                     const targetSrc = newImgSrc
                         ? newImgSrc
-                        : (isCustomOdor ? OLD_ODOR : null);
+                        : (isCustomSmell ? OLD_SMELL : null);
 
-                    if (targetSrc && targetSrc.split('/').pop() !== currentImgSrcFileName) {
+                    if (targetSrc && targetSrc.split('/').pop() !== currentSrc) {
                         img.src = targetSrc;
                     }
                 }
@@ -121,30 +121,30 @@
 
         const style = document.createElement('style');
         style.innerHTML = `
-            #odor-settings-panel {
+            #smell-settings-panel {
                 max-width: 800px; margin: 20px auto; padding: 15px; border: 1px solid #444;
                 color: #ddd; background: rgba(34, 34, 34, 0.70); border-radius: 20px;
             }
-            #odor-settings-panel h3 { color: #fff; border-bottom: 1px solid #555; padding-bottom: 5px; }
-            #odor-settings-panel .rule-item { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
+            #smell-settings-panel h3 { color: #fff; border-bottom: 1px solid #555; padding-bottom: 5px; }
+            #smell-settings-panel .rule-item { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
 
-            #odor-settings-panel .column-headers {
+            #smell-settings-panel .column-headers {
                 display: flex; gap: 10px; margin-bottom: 5px; padding: 0 5px; font-weight: bold; color: #aaa;
             }
-            #odor-settings-panel .column-headers div:first-child { flex-grow: 1; text-align: left; }
-            #odor-settings-panel .column-headers div:nth-child(2) { width: 290px; text-align: left; }
-            #odor-settings-panel .column-headers div:last-child { width: 90px; }
+            #smell-settings-panel .column-headers div:first-child { flex-grow: 1; text-align: left; }
+            #smell-settings-panel .column-headers div:nth-child(2) { width: 290px; text-align: left; }
+            #smell-settings-panel .column-headers div:last-child { width: 90px; }
 
-            #odor-settings-panel input { padding: 5px; border: 1px solid #555; background: #333; color: #eee; }
-            #odor-settings-panel button { padding: 8px 15px; cursor: pointer; border: none; color: white; margin-right: 10px; }
-            #odor-settings-panel button#save-settings-btn { background: #5b6f5b; }
-            #odor-settings-panel button.remove { background: #5d3b3b; }
-            #odor-settings-panel button.add { background: #40404857; }
+            #smell-settings-panel input { padding: 5px; border: 1px solid #555; background: #333; color: #eee; }
+            #smell-settings-panel button { padding: 8px 15px; cursor: pointer; border: none; color: white; margin-right: 10px; }
+            #smell-settings-panel button#save-settings-btn { background: #5b6f5b; }
+            #smell-settings-panel button.remove { background: #5d3b3b; }
+            #smell-settings-panel button.add { background: #40404857; }
         `;
         document.head.appendChild(style);
 
         const panel = document.createElement('div');
-        panel.id = 'odor-settings-panel';
+        panel.id = 'smell-settings-panel';
         panel.innerHTML = `
             <h3>Настройка Запахов</h3>
             <div class="column-headers"><div>Должность</div><div>Запах</div><div></div></div>
@@ -212,7 +212,7 @@
                      saveData(dataToSave);
             } else if (confirm("Список пуст. Сбросить настройки на дефолтные?")) {
                      GM_deleteValue(STORAGE_KEY).then(() => {
-                    renderRules(DEFAULT_PHRASES_TO_IMAGES);
+                    renderRules(TEXT_TO_IMAGE);
                     alert("Настройки сброшены!");
                 });
             } else {
@@ -223,7 +223,7 @@
         resetBtn.onclick = () => {
             if (confirm("Сбросить настройки на дефолтные?")) {
                 GM_deleteValue(STORAGE_KEY).then(() => {
-                    renderRules(DEFAULT_PHRASES_TO_IMAGES);
+                    renderRules(TEXT_TO_IMAGE);
                     alert("Настройки сброшены!");
                 });
             }
@@ -249,7 +249,7 @@
     if (window.location.pathname.endsWith('/settings')) {
         waitForElement('#site_table').then(createSettingsInterface);
     } else if (document.querySelector('#main_table')) {
-        runOdorLogic();
+        runSmell();
     }
 
 })();
