@@ -12,7 +12,7 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_listValues
-// @run-at       document-idle
+// @run       document-idle
 // @homepageURL  https://openuserjs.org/scripts/Achterstem/CW-smell
 // @downloadURL  https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // @updateURL    https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
