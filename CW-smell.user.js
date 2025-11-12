@@ -2,7 +2,7 @@
 // @name         CW smell
 // @namespace    http://tampermonkey.net/
 // @version      1.0.9
-// @description  Меняет запахи по исходному запаху + по имени/статусу/должности. ФИНАЛЬНО ИСПРАВЛЕНА проблема кэширования и залипания запахов при смене локации.
+// @description  Меняет запахи по исходному запаху + по имени/статусу/должности.
 // @author       achterstem
 // @match        http*://*.catwar.net/*
 // @match        http*://*.catwar.su/*
