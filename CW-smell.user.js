@@ -28,7 +28,7 @@
             try {
                 return GM_getValue(key, defaultValue);
             } catch (e) {
-                console.error("CW Smell: Ошибка при синхронном GM_getValue. Возврат дефолта.", e);
+                console.error("Возврат дефолта.", e);
             }
         }
         return defaultValue;
@@ -39,7 +39,7 @@
             try {
                 GM_setValue(key, value);
             } catch (e) {
-                console.error("CW Smell: Ошибка при синхронном GM_setValue. Сохранение не выполнено.", e);
+                console.error("Сохранение не выполнено.", e);
             }
         }
     };
@@ -49,7 +49,7 @@
             try {
                 GM_deleteValue(key);
             } catch (e) {
-                console.error("CW Smell: Ошибка при синхронном GM_deleteValue. Удаление не выполнено.", e);
+                console.error("Удаление не выполнено.", e);
             }
         }
     };
@@ -324,7 +324,7 @@
             rules = storedData ? JSON.parse(storedData) : DEFAULT_RULES;
 
         } catch (e) {
-            console.error("CW Smell: Ошибка при парсинге сохраненных правил. Использование дефолтных.", e);
+            console.error("Возврат дефолта.", e);
             rules = DEFAULT_RULES;
         }
 
@@ -405,7 +405,7 @@
         } else if (currentCatId !== cachedCatId) {
              if (hasCustomSrc) {
                  img.src = originalSrc;
-                 currentFullRelativeSrc = originalSrc; // Обновляем текущий SRC
+                 currentFullRelativeSrc = originalSrc;
              }
 
              img.removeAttribute(ORIGINAL_SRC_ATTRIBUTE);
