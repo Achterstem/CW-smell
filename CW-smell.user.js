@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CW smell
 // @namespace    http://tampermonkey.net/
-// @version      1.0.1
-// @description  Меняет запахи по исходному запаху + тексту в плашке о коте.
+// @version      1.0.9
+// @description  Меняет запахи по исходному запаху + по имени/статусу/должности. ФИНАЛЬНО ИСПРАВЛЕНА проблема кэширования и залипания запахов при смене локации.
 // @author       achterstem
 // @match        http*://*.catwar.net/*
 // @match        http*://*.catwar.su/*
@@ -12,7 +12,7 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_listValues
-// @run       document-idle
+// @run-at       document-idle
 // @homepageURL  https://openuserjs.org/scripts/Achterstem/CW-smell
 // @downloadURL  https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // @updateURL    https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
@@ -28,6 +28,7 @@
             try {
                 return GM_getValue(key, defaultValue);
             } catch (e) {
+                console.error("CW Smell: Ошибка при синхронном GM_getValue. Возврат дефолта.", e);
             }
         }
         return defaultValue;
@@ -38,6 +39,7 @@
             try {
                 GM_setValue(key, value);
             } catch (e) {
+                console.error("CW Smell: Ошибка при синхронном GM_setValue. Сохранение не выполнено.", e);
             }
         }
     };
@@ -47,6 +49,7 @@
             try {
                 GM_deleteValue(key);
             } catch (e) {
+                console.error("CW Smell: Ошибка при синхронном GM_deleteValue. Удаление не выполнено.", e);
             }
         }
     };
@@ -321,6 +324,7 @@
             rules = storedData ? JSON.parse(storedData) : DEFAULT_RULES;
 
         } catch (e) {
+            console.error("CW Smell: Ошибка при парсинге сохраненных правил. Использование дефолтных.", e);
             rules = DEFAULT_RULES;
         }
 
@@ -341,8 +345,9 @@
     };
 
     const saveData = (data) => {
-        gmSetValueSync(STORAGE_KEY, JSON.stringify(data));
-        (confirm("Сохранить запахи?"))
+        if (confirm("Сохранить запахи?")) {
+            gmSetValueSync(STORAGE_KEY, JSON.stringify(data));
+        }
     };
 
     const resetData = () => {
@@ -398,16 +403,14 @@
              img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
 
         } else if (currentCatId !== cachedCatId) {
-
              if (hasCustomSrc) {
                  img.src = originalSrc;
-                 currentFullRelativeSrc = originalSrc;
+                 currentFullRelativeSrc = originalSrc; // Обновляем текущий SRC
              }
 
              img.removeAttribute(ORIGINAL_SRC_ATTRIBUTE);
 
              img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
-
              return applySmellsToCage(cage, rules);
 
         } else if (hasCustomSrc) {
@@ -577,8 +580,8 @@
             <div id="smell-list-content" class="hidden">
                 <div class="column-headers">
                     <div>Исходный Запах</div>
-                    <div>Должность</div>
-                    <div>Нужный запах</div>
+                    <div>Должность/Имя (Часть)</div>
+                    <div>Нужный запах (URL/путь)</div>
                     <div></div>
                 </div>
                 <div id="rule-list"></div>
@@ -588,7 +591,8 @@
             <button id="save-settings-btn">Сохранить</button>
             <button id="reset-settings-btn" class="remove">Сбросить</button>
             <p style="font-size: 0.8em; margin-top: 10px;">
-                * Можно вводить как должности, так и имена, статусы.
+                * Можно вводить как и должности, так и имена.<br>
+                * Исходный запах: часть пути к иконке (например, <b>odoroj/232.png</b>)
             </p>
         `;
 
@@ -656,27 +660,23 @@
 
         saveBtn.onclick = () => {
             const dataToSave = collectData();
-
             if (dataToSave.length > 0) {
                 saveData(dataToSave);
                 alert("Запахи сохранены!");
             } else if (confirm("Список пуст. Сбросить запахи на дефолтные?")) {
                 resetData();
                 renderRules(DEFAULT_RULES);
-                alert("Запахи сброшены!");
+                alert("Запахи сброшены.");
             } else {
                 alert("Сохранение отменено.");
-                return;
             }
-            loadData();
         };
 
         resetBtn.onclick = () => {
             if (confirm("Сбросить запахи на дефолтные?")) {
                 resetData();
                 renderRules(DEFAULT_RULES);
-                alert("Запахи сброшены!");
-                loadData();
+                alert("Запахи сброшены.");
             }
         };
 
