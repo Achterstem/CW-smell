@@ -1,27 +1,55 @@
 // ==UserScript==
-// @name CW smell
-// @namespace http://tampermonkey.net/
-// @version 1.0.0
-// @description Меняет запахи по исходному запаху + по имени/статусу/должности. Связь https://catwar.su/cat1600314
-// @author achterstem
-// @match http*://*.catwar.net/*
-// @match http*://*.catwar.su/*
-// @icon https://www.google.com/s2/favicons?sz=64&domain=catwar.su
-// @license MIT
-// @grant GM_setValue
-// @grant GM_getValue
-// @grant GM_deleteValue
-// @grant GM_listValues
-// @run-at document-idle
-// @homepageURL https://openuserjs.org/scripts/Achterstem/CW-smell
-// @downloadURL https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
-// @updateURL https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
+// @name         CW smell
+// @namespace    http://tampermonkey.net/
+// @version      1.0.1
+// @description  Меняет запахи по исходному запаху + тексту в плашке о коте.
+// @author       achterstem
+// @match        http*://*.catwar.net/*
+// @match        http*://*.catwar.su/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=catwar.su
+// @license      MIT
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @grant        GM_listValues
+// @run-at       document-idle
+// @homepageURL  https://openuserjs.org/scripts/Achterstem/CW-smell
+// @downloadURL  https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
+// @updateURL    https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // ==/UserScript==
 
 (function() {
     'use strict';
 
     const STORAGE_KEY = 'CUSTOM_SMELLS_DATA';
+
+    const gmGetValueSync = (key, defaultValue) => {
+        if (typeof GM_getValue === 'function') {
+            try {
+                return GM_getValue(key, defaultValue);
+            } catch (e) {
+            }
+        }
+        return defaultValue;
+    };
+
+    const gmSetValueSync = (key, value) => {
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(key, value);
+            } catch (e) {
+            }
+        }
+    };
+
+    const gmDeleteValueSync = (key) => {
+        if (typeof GM_deleteValue === 'function') {
+            try {
+                GM_deleteValue(key);
+            } catch (e) {
+            }
+        }
+    };
 
     const DEFAULT_RULES = [
         // ЗАСТЫВШАЯ ЭПОХА
@@ -283,27 +311,42 @@
     ];
 
     let ALL_ORIGINAL_SMELLS = [];
+    let CUSTOM_TO_BASE_SMELL_MAP = new Map();
 
-    const loadData = async () => {
-    const storedData = await GM_getValue(STORAGE_KEY);
-    const rules = storedData ? JSON.parse(storedData) : DEFAULT_RULES;
+    const loadData = () => {
+        let storedData = gmGetValueSync(STORAGE_KEY, null);
 
-    const originalSmellsSet = new Set();
-    rules.forEach(([oldSmell]) => {
-        if (oldSmell) {
-            originalSmellsSet.add(oldSmell);
+        let rules;
+        try {
+            rules = storedData ? JSON.parse(storedData) : DEFAULT_RULES;
+
+        } catch (e) {
+            rules = DEFAULT_RULES;
         }
-    });
 
-    ALL_ORIGINAL_SMELLS = Array.from(originalSmellsSet);
+        const originalSmellsSet = new Set();
+        CUSTOM_TO_BASE_SMELL_MAP.clear();
 
-    return rules;
+        rules.forEach(([oldSmell, phrase, newSmell]) => {
+            if (oldSmell && newSmell) {
+                const canonicalBaseSmell = oldSmell.split('/').slice(-2).join('/');
+                originalSmellsSet.add(canonicalBaseSmell);
+
+                CUSTOM_TO_BASE_SMELL_MAP.set(newSmell, oldSmell);
+            }
+        });
+
+        ALL_ORIGINAL_SMELLS = Array.from(originalSmellsSet);
+        return rules;
     };
 
-    const saveData = async (data) => {
-        if (confirm("Запахи сохранены!")) {
-        await GM_setValue(STORAGE_KEY, JSON.stringify(data));
-        }
+    const saveData = (data) => {
+        gmSetValueSync(STORAGE_KEY, JSON.stringify(data));
+        (confirm("Сохранить запахи?"))
+    };
+
+    const resetData = () => {
+        gmDeleteValueSync(STORAGE_KEY);
     };
 
 
@@ -316,75 +359,120 @@
 
     const getMatchingImage = (text, canonicalBaseSmell, rules) => {
         for (const [oldSmell, phrase, newImg] of rules) {
-            if (canonicalBaseSmell === oldSmell) {
+            const ruleCanonicalSmell = oldSmell.split('/').slice(-2).join('/');
+
+            if (canonicalBaseSmell.endsWith(ruleCanonicalSmell.split('/').pop())) {
                 if (phraseInText(text, phrase)) {
-                    return { newSmell: newImg };
+                    return { newSmell: newImg, originalBase: oldSmell };
                 }
             }
         }
-        return { newSmell: null };
+        return { newSmell: null, originalBase: null };
     };
 
+    const ORIGINAL_SRC_ATTRIBUTE = 'data-original-smell';
+    const CURRENT_CAT_ID_ATTRIBUTE = 'data-cat-id';
+
     const applySmellsToCage = (cage, rules) => {
-        const img = cage.querySelector('img[src*="odoroj/"]');
+        const img = cage.querySelector('img[src*="odoroj/"], img[data-original-smell]');
         const catNameElement = cage.querySelector('a');
 
         if (!img || !catNameElement) return;
 
-        const catName = catNameElement.textContent.trim();
-        const CURRENT_CACHED_NAME_ATTRIBUTE = 'data-cached-name';
-        const ORIGINAL_SRC_ATTRIBUTE = 'data-original-smell';
+        let currentFullRelativeSrc = img.getAttribute('src');
+        const textContent = (cage.querySelector('span') || { innerText: '' }).innerText + ' ' + catNameElement.textContent.trim();
+
+        const catUrl = catNameElement.href;
+        const match = catUrl.match(/cat(\d+)/);
+        const currentCatId = match ? match[1] : null;
+        const cachedCatId = img.getAttribute(CURRENT_CAT_ID_ATTRIBUTE);
+
+        const hasCustomSrc = CUSTOM_TO_BASE_SMELL_MAP.has(currentFullRelativeSrc);
+
 
         let originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE);
-        const currentFullRelativeSrc = img.getAttribute('src');
-        const cachedName = img.getAttribute(CURRENT_CACHED_NAME_ATTRIBUTE);
-
-        if (cachedName !== catName) {
-            originalSrc = null;
-            img.removeAttribute(ORIGINAL_SRC_ATTRIBUTE);
-            img.setAttribute(CURRENT_CACHED_NAME_ATTRIBUTE, catName);
-        }
 
         if (!originalSrc) {
-            originalSrc = currentFullRelativeSrc;
-            img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
+             originalSrc = currentFullRelativeSrc;
+             img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
+             img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+
+        } else if (currentCatId !== cachedCatId) {
+
+             if (hasCustomSrc) {
+                 img.src = originalSrc;
+                 currentFullRelativeSrc = originalSrc;
+             }
+
+             img.removeAttribute(ORIGINAL_SRC_ATTRIBUTE);
+
+             img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+
+             return applySmellsToCage(cage, rules);
+
+        } else if (hasCustomSrc) {
+             const baseSmellForCustom = CUSTOM_TO_BASE_SMELL_MAP.get(currentFullRelativeSrc);
+             const matchingResult = getMatchingImage(textContent, baseSmellForCustom, rules);
+
+             if (!matchingResult.newSmell || matchingResult.newSmell !== currentFullRelativeSrc) {
+                 img.src = originalSrc;
+                 currentFullRelativeSrc = originalSrc;
+             }
         }
 
-        const originalSrcPart = originalSrc.split('/').pop();
-        const canonicalBaseSmell = ALL_ORIGINAL_SMELLS.find(s => s.endsWith(originalSrcPart));
+        originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE) || currentFullRelativeSrc;
+
+        const originalSrcPart = originalSrc.split('/').slice(-2).join('/');
+
+        const matchingResult = getMatchingImage(textContent, originalSrcPart, rules);
 
         let targetSrc = originalSrc;
 
-        if (canonicalBaseSmell) {
-            const textContent = cage.querySelector('span') ? cage.querySelector('span').innerText : cage.innerText;
-            const matchingResult = getMatchingImage(textContent, canonicalBaseSmell, rules);
-
-            if (matchingResult.newSmell) {
-                targetSrc = matchingResult.newSmell;
-            }
+        if (matchingResult.newSmell) {
+            targetSrc = matchingResult.newSmell;
         }
 
-        if (targetSrc && targetSrc !== currentFullRelativeSrc) {
+        if (targetSrc && targetSrc !== img.src) {
             img.src = targetSrc;
         }
     };
 
-    const initSmellObservers = async () => {
-        const rules = await loadData();
-        const mapContainer = document.querySelector('#ist, #cages_div');
+    const initSmellObservers = () => {
+        const rules = loadData();
 
-        if (!mapContainer) return;
+        const mapContainer = document.querySelector('#ist, #cages_div');
+        if (!mapContainer) {
+             return;
+        }
 
         const observers = [];
 
         const setupCageObserver = (cage) => {
+            const img = cage.querySelector('img[src*="odoroj/"]');
+            const catNameElement = cage.querySelector('a');
             const targetSpan = cage.querySelector('span');
-            if (!targetSpan) return;
+
+            if (!img || !catNameElement || !targetSpan) return;
 
             applySmellsToCage(cage, rules);
 
-            const cageObserver = new MutationObserver(() => {
-                applySmellsToCage(cage, rules);
+            const cageObserver = new MutationObserver((mutationsList) => {
+                let shouldApply = false;
+
+                for (const mutation of mutationsList) {
+                    if (mutation.type === 'childList' || mutation.type === 'characterData') {
+                        shouldApply = true;
+                        break;
+                    }
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'href') {
+                        shouldApply = true;
+                        break;
+                    }
+                }
+
+                if (shouldApply) {
+                    applySmellsToCage(cage, rules);
+                }
             });
 
             cageObserver.observe(targetSpan, {
@@ -394,23 +482,30 @@
                 attributes: true
             });
 
+            cageObserver.observe(catNameElement, {
+                attributes: true,
+                attributeFilter: ['href']
+            });
+
             observers.push(cageObserver);
         };
 
         document.querySelectorAll('.cage').forEach(setupCageObserver);
 
         const mapChangeObserver = new MutationObserver((mutationsList) => {
-            for (const mutation of mutationsList) {
+            mutationsList.forEach(mutation => {
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach(node => {
                         if (node.nodeType === 1 && node.classList.contains('cage')) {
                             setupCageObserver(node);
                         }
                     });
-                }
-            }
 
-            document.querySelectorAll('.cage').forEach(cage => applySmellsToCage(cage, rules));
+                    document.querySelectorAll('.cage').forEach(cage => {
+                        applySmellsToCage(cage, rules);
+                    });
+                }
+            });
         });
 
         mapChangeObserver.observe(mapContainer, {
@@ -423,184 +518,188 @@
 
 
     // --- НАСТРОЙКИ ---
-    const createSettingsInterface = async () => {
-    const currentData = await loadData();
-    const siteTable = document.querySelector("#site_table");
+    const createSettingsInterface = () => {
+        const currentData = loadData();
+        const siteTable = document.querySelector("#site_table");
 
-    if (!siteTable) return;
+        if (!siteTable) return;
 
-    const settingsContainer = siteTable.getAttribute("data-mobile") === "0"
-        ? document.querySelector("#branch")
-        : siteTable;
+        const settingsContainer = siteTable.getAttribute("data-mobile") === "0"
+            ? document.querySelector("#branch")
+            : siteTable;
 
-    if (!settingsContainer) return;
+        if (!settingsContainer) return;
 
-    const style = document.createElement('style');
-    style.innerHTML = `
-        #smell-settings-panel {
-            max-width: 800px; margin: 20px auto; padding: 15px; border: 1px solid #000000;
-            color: #c9c9c9; background: rgb(35 33 33 / 83%); border-radius: 20px;
-        }
-        #smell-settings-panel h3 { color: #ffffff; border-bottom: 1px solid #ffffff; padding-bottom: 5px; }
+        const style = document.createElement('style');
+        style.innerHTML = `
+            #smell-settings-panel {
+                max-width: 800px; margin: 20px auto; padding: 15px; border: 1px solid #000000;
+                color: #c9c9c9; background: rgb(35 33 33 / 83%); border-radius: 20px;
+            }
+            #smell-settings-panel h3 { color: #ffffff; border-bottom: 1px solid #ffffff; padding-bottom: 5px; }
 
-        #smell-settings-panel #toggle-rules-btn {
-            background: #232020;
-            padding: 5px 10px;
-            margin-top: 5px;
-            margin-bottom: 5px;
-            border-radius: 10px;
-            font-size: 0.9em;
-        }
+            #smell-settings-panel #toggle-rules-btn {
+                background: #232020;
+                padding: 5px 10px;
+                margin-top: 5px;
+                margin-bottom: 5px;
+                border-radius: 10px;
+                font-size: 0.9em;
+            }
 
-        #smell-settings-panel .rule-item { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
+            #smell-settings-panel .rule-item { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
 
-        #smell-settings-panel .column-headers {
-            display: flex; gap: 10px; margin-bottom: 5px; padding: 0 5px; font-weight: bold; color: #afafaf;
-        }
-        #smell-settings-panel .column-headers div:first-child { width: 150px; text-align: left; }
-        #smell-settings-panel .column-headers div:nth-child(2) { flex-grow: 1; text-align: left; }
-        #smell-settings-panel .column-headers div:nth-child(3) { width: 290px; text-align: left; }
-        #smell-settings-panel .column-headers div:last-child { width: 90px; }
+            #smell-settings-panel .column-headers {
+                display: flex; gap: 10px; margin-bottom: 5px; padding: 0 5px; font-weight: bold; color: #afafaf;
+            }
+            #smell-settings-panel .column-headers div:first-child { width: 150px; text-align: left; }
+            #smell-settings-panel .column-headers div:nth-child(2) { flex-grow: 1; text-align: left; }
+            #smell-settings-panel .column-headers div:nth-child(3) { width: 290px; text-align: left; }
+            #smell-settings-panel .column-headers div:last-child { width: 90px; }
 
-        #smell-settings-panel input { padding: 5px; border: 1px solid #000000; background: #1a1818bf; color: #e3e3e3; }
-        #smell-settings-panel button { padding: 6px 8px; cursor: pointer; border: none; color: white; margin-right: 10px; border-radius: 20px; }
-        #smell-settings-panel button#save-settings-btn { background: #646464; }
-        #smell-settings-panel button.remove { background: #613737; }
-        #smell-settings-panel button.add { background: #646464; }
+            #smell-settings-panel input { padding: 5px; border: 1px solid #000000; background: #1a1818bf; color: #e3e3e3; }
+            #smell-settings-panel button { padding: 6px 8px; cursor: pointer; border: none; color: white; margin-right: 10px; border-radius: 20px; }
+            #smell-settings-panel button#save-settings-btn { background: #646464; }
+            #smell-settings-panel button.remove { background: #613737; }
+            #smell-settings-panel button.add { background: #646464; }
 
-        #smell-list-content.hidden {
-            display: none;
-        }
-    `;
-    document.head.appendChild(style);
+            #smell-list-content.hidden {
+                display: none;
+            }
+        `;
+        document.head.appendChild(style);
 
-    const panel = document.createElement('div');
-    panel.id = 'smell-settings-panel';
-    panel.innerHTML = `
-        <h3>Настройка Запахов</h3>
-        <button id="toggle-rules-btn">Развернуть</button>
-        <div id="smell-list-content" class="hidden">
-            <div class="column-headers">
-                <div>Исходный Запах</div>
-                <div>Должность</div>
-                <div>Нужный запах</div>
-                <div></div>
+        const panel = document.createElement('div');
+        panel.id = 'smell-settings-panel';
+        panel.innerHTML = `
+            <h3>Настройка Запахов</h3>
+            <button id="toggle-rules-btn">Развернуть</button>
+            <div id="smell-list-content" class="hidden">
+                <div class="column-headers">
+                    <div>Исходный Запах</div>
+                    <div>Должность</div>
+                    <div>Нужный запах</div>
+                    <div></div>
+                </div>
+                <div id="rule-list"></div>
+                <button id="add-rule-btn" class="add">Добавить запах</button>
             </div>
-            <div id="rule-list"></div>
-            <button id="add-rule-btn" class="add">Добавить запах</button>
-        </div>
-        <hr style="margin-top: 15px;">
-        <button id="save-settings-btn">Сохранить</button>
-        <button id="reset-settings-btn" class="remove">Сбросить</button>
-        <p style="font-size: 0.8em; margin-top: 10px;">
-            <br>* Можно вводить как и должности, так и имена.
-        </p>
-    `;
+            <hr style="margin-top: 15px;">
+            <button id="save-settings-btn">Сохранить</button>
+            <button id="reset-settings-btn" class="remove">Сбросить</button>
+            <p style="font-size: 0.8em; margin-top: 10px;">
+                * Можно вводить как должности, так и имена, статусы.
+            </p>
+        `;
 
-    const targetElement = document.querySelector('a[href="del"]');
-    if (targetElement) {
-        targetElement.insertAdjacentElement('afterend', panel);
-    } else {
-        settingsContainer.appendChild(panel);
-    }
-
-    const toggleBtn = panel.querySelector('#toggle-rules-btn');
-    const listContent = panel.querySelector('#smell-list-content');
-
-    const ruleList = panel.querySelector('#rule-list');
-    const saveBtn = panel.querySelector('#save-settings-btn');
-    const resetBtn = panel.querySelector('#reset-settings-btn');
-    const addBtn = panel.querySelector('#add-rule-btn');
-
-    toggleBtn.onclick = () => {
-        listContent.classList.toggle('hidden');
-        if (listContent.classList.contains('hidden')) {
-            toggleBtn.textContent = 'Развернуть';
+        const targetElement = document.querySelector('a[href="del"]');
+        if (targetElement) {
+            targetElement.insertAdjacentElement('afterend', panel);
         } else {
-            toggleBtn.textContent = 'Свернуть';
+            settingsContainer.appendChild(panel);
         }
-    };
 
-    const renderRules = (data) => {
-        ruleList.innerHTML = '';
-        data.forEach(([oldSmell, phrase, image]) => {
-            const item = document.createElement('div');
-            item.className = 'rule-item';
-            item.innerHTML = `
-                <input type="text" class="old-smell" value="${oldSmell}" placeholder="odoroj/403.png" style="width: 150px;">
-                <input type="text" class="phrase" value="${phrase}" placeholder="Название должности" style="flex-grow: 1;">
-                <input type="text" class="image" value="${image}" placeholder="Ссылка на картинку" style="width: 290px;">
-                <button class="remove">Удалить</button>
-            `;
-            ruleList.appendChild(item);
-        });
-    };
+        const toggleBtn = panel.querySelector('#toggle-rules-btn');
+        const listContent = panel.querySelector('#smell-list-content');
 
-    const collectData = () => {
-        const data = [];
-        panel.querySelectorAll('.rule-item').forEach(item => {
-            const oldSmell = item.querySelector('.old-smell').value.trim();
-            const phrase = item.querySelector('.phrase').value.trim();
-            const image = item.querySelector('.image').value.trim();
-            if (oldSmell && phrase && image) data.push([oldSmell, phrase, image]);
-        });
-        return data;
-    };
+        const ruleList = panel.querySelector('#rule-list');
+        const saveBtn = panel.querySelector('#save-settings-btn');
+        const resetBtn = panel.querySelector('#reset-settings-btn');
+        const addBtn = panel.querySelector('#add-rule-btn');
 
-    addBtn.onclick = () => {
-        const newData = collectData();
-        newData.push(["", "", ""]);
-        renderRules(newData);
-    };
+        toggleBtn.onclick = () => {
+            listContent.classList.toggle('hidden');
+            if (listContent.classList.contains('hidden')) {
+                toggleBtn.textContent = 'Развернуть';
+            } else {
+                toggleBtn.textContent = 'Свернуть';
+            }
+        };
 
-    ruleList.onclick = (e) => {
-        if (e.target.classList.contains('remove') && e.target.id !== 'reset-settings-btn') {
-            e.target.closest('.rule-item').remove();
-        }
-    };
-
-    saveBtn.onclick = () => {
-        const dataToSave = collectData();
-        if (dataToSave.length > 0) {
-            saveData(dataToSave);
-        } else if (confirm("Список пуст, настройки сброшены на дефолтные.")) {
-            GM_deleteValue(STORAGE_KEY).then(() => {
-                renderRules(DEFAULT_RULES);
+        const renderRules = (data) => {
+            ruleList.innerHTML = '';
+            data.forEach(([oldSmell, phrase, image]) => {
+                const item = document.createElement('div');
+                item.className = 'rule-item';
+                item.innerHTML = `
+                    <input type="text" class="old-smell" value="${oldSmell}" placeholder="odoroj/403.png" style="width: 150px;">
+                    <input type="text" class="phrase" value="${phrase}" placeholder="Название должности" style="flex-grow: 1;">
+                    <input type="text" class="image" value="${image}" placeholder="Ссылка на картинку" style="width: 290px;">
+                    <button class="remove">Удалить</button>
+                `;
+                ruleList.appendChild(item);
             });
-        } else {
-            alert("Сохранение отменено.");
-        }
-    };
+        };
 
-    resetBtn.onclick = () => {
-        if (confirm("Настройки сброшены на дефолтные.")) {
-            GM_deleteValue(STORAGE_KEY).then(() => {
-                renderRules(DEFAULT_RULES);
+        const collectData = () => {
+            const data = [];
+            panel.querySelectorAll('.rule-item').forEach(item => {
+                const oldSmell = item.querySelector('.old-smell').value.trim();
+                const phrase = item.querySelector('.phrase').value.trim();
+                const image = item.querySelector('.image').value.trim();
+                if (oldSmell && phrase && image) data.push([oldSmell, phrase, image]);
             });
-        }
-    };
+            return data;
+        };
 
-    renderRules(currentData);
+        addBtn.onclick = () => {
+            const newData = collectData();
+            newData.push(["", "", ""]);
+            renderRules(newData);
+        };
+
+        ruleList.onclick = (e) => {
+            if (e.target.classList.contains('remove') && e.target.id !== 'reset-settings-btn') {
+                e.target.closest('.rule-item').remove();
+            }
+        };
+
+        saveBtn.onclick = () => {
+            const dataToSave = collectData();
+
+            if (dataToSave.length > 0) {
+                saveData(dataToSave);
+                alert("Запахи сохранены!");
+            } else if (confirm("Список пуст. Сбросить запахи на дефолтные?")) {
+                resetData();
+                renderRules(DEFAULT_RULES);
+                alert("Запахи сброшены!");
+            } else {
+                alert("Сохранение отменено.");
+                return;
+            }
+            loadData();
+        };
+
+        resetBtn.onclick = () => {
+            if (confirm("Сбросить запахи на дефолтные?")) {
+                resetData();
+                renderRules(DEFAULT_RULES);
+                alert("Запахи сброшены!");
+                loadData();
+            }
+        };
+
+        renderRules(currentData);
     };
 
     const waitForElement = (selector) => new Promise(resolve => {
-    const element = document.querySelector(selector);
-    if (element) return resolve(element);
+        const element = document.querySelector(selector);
+        if (element) return resolve(element);
 
-    const observer = new MutationObserver((_, obs) => {
-        const el = document.querySelector(selector);
-        if (el) {
-            obs.disconnect();
-            resolve(el);
-        }
-    });
+        const observer = new MutationObserver((_, obs) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                obs.disconnect();
+                resolve(el);
+            }
+        });
         observer.observe(document.body, { childList: true, subtree: true });
     });
 
-if (window.location.pathname.endsWith('/settings')) {
-    waitForElement('#site_table').then(createSettingsInterface);
-} else if (document.querySelector('#main_table')) {
-    waitForElement('#ist').then(initSmellObservers);
-}
-
+    if (window.location.pathname.endsWith('/settings')) {
+        waitForElement('#site_table').then(createSettingsInterface);
+    } else if (document.querySelector('#main_table')) {
+        waitForElement('#ist, #cages_div').then(initSmellObservers);
+    }
 })();
