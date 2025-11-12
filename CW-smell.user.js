@@ -13,7 +13,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_listValues
 // @run-at       document-idle
-// @homepageURL  https://openuserjs.org/scripts/Achterstem/CW-smell
+// @homepageURL  https://greasyfork.org/ru/scripts/555607-cw-smell
 // @downloadURL  https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // @updateURL    https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // ==/UserScript==
@@ -524,15 +524,11 @@
     const createSettingsInterface = () => {
         const currentData = loadData();
         const siteTable = document.querySelector("#site_table");
-
         if (!siteTable) return;
-
         const settingsContainer = siteTable.getAttribute("data-mobile") === "0"
             ? document.querySelector("#branch")
             : siteTable;
-
         if (!settingsContainer) return;
-
         const style = document.createElement('style');
         style.innerHTML = `
             #smell-settings-panel {
@@ -540,7 +536,6 @@
                 color: #c9c9c9; background: rgb(35 33 33 / 83%); border-radius: 20px;
             }
             #smell-settings-panel h3 { color: #ffffff; border-bottom: 1px solid #ffffff; padding-bottom: 5px; }
-
             #smell-settings-panel #toggle-rules-btn {
                 background: #232020;
                 padding: 5px 10px;
@@ -549,9 +544,7 @@
                 border-radius: 10px;
                 font-size: 0.9em;
             }
-
             #smell-settings-panel .rule-item { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
-
             #smell-settings-panel .column-headers {
                 display: flex; gap: 10px; margin-bottom: 5px; padding: 0 5px; font-weight: bold; color: #afafaf;
             }
@@ -559,19 +552,17 @@
             #smell-settings-panel .column-headers div:nth-child(2) { flex-grow: 1; text-align: left; }
             #smell-settings-panel .column-headers div:nth-child(3) { width: 290px; text-align: left; }
             #smell-settings-panel .column-headers div:last-child { width: 90px; }
-
             #smell-settings-panel input { padding: 5px; border: 1px solid #000000; background: #1a1818bf; color: #e3e3e3; }
             #smell-settings-panel button { padding: 6px 8px; cursor: pointer; border: none; color: white; margin-right: 10px; border-radius: 20px; }
             #smell-settings-panel button#save-settings-btn { background: #646464; }
             #smell-settings-panel button.remove { background: #613737; }
+            #smell-settings-panel button#delete-all-btn { background: #7c3d3d; }
             #smell-settings-panel button.add { background: #646464; }
-
             #smell-list-content.hidden {
                 display: none;
             }
         `;
         document.head.appendChild(style);
-
         const panel = document.createElement('div');
         panel.id = 'smell-settings-panel';
         panel.innerHTML = `
@@ -580,8 +571,8 @@
             <div id="smell-list-content" class="hidden">
                 <div class="column-headers">
                     <div>Исходный Запах</div>
-                    <div>Должность/Имя (Часть)</div>
-                    <div>Нужный запах (URL/путь)</div>
+                    <div>Должность</div>
+                    <div>Нужный запах</div>
                     <div></div>
                 </div>
                 <div id="rule-list"></div>
@@ -590,27 +581,24 @@
             <hr style="margin-top: 15px;">
             <button id="save-settings-btn">Сохранить</button>
             <button id="reset-settings-btn" class="remove">Сбросить</button>
+            <button id="delete-all-btn" class="remove">Удалить все запахи</button>
             <p style="font-size: 0.8em; margin-top: 10px;">
-                * Можно вводить как и должности, так и имена.<br>
-                * Исходный запах: часть пути к иконке (например, <b>odoroj/232.png</b>)
+                * Можно вводить как и должности, так и имена.
             </p>
         `;
-
         const targetElement = document.querySelector('a[href="del"]');
         if (targetElement) {
             targetElement.insertAdjacentElement('afterend', panel);
         } else {
             settingsContainer.appendChild(panel);
         }
-
         const toggleBtn = panel.querySelector('#toggle-rules-btn');
         const listContent = panel.querySelector('#smell-list-content');
-
         const ruleList = panel.querySelector('#rule-list');
         const saveBtn = panel.querySelector('#save-settings-btn');
         const resetBtn = panel.querySelector('#reset-settings-btn');
+        const deleteAllBtn = panel.querySelector('#delete-all-btn');
         const addBtn = panel.querySelector('#add-rule-btn');
-
         toggleBtn.onclick = () => {
             listContent.classList.toggle('hidden');
             if (listContent.classList.contains('hidden')) {
@@ -619,7 +607,6 @@
                 toggleBtn.textContent = 'Свернуть';
             }
         };
-
         const renderRules = (data) => {
             ruleList.innerHTML = '';
             data.forEach(([oldSmell, phrase, image]) => {
@@ -634,7 +621,6 @@
                 ruleList.appendChild(item);
             });
         };
-
         const collectData = () => {
             const data = [];
             panel.querySelectorAll('.rule-item').forEach(item => {
@@ -645,19 +631,16 @@
             });
             return data;
         };
-
         addBtn.onclick = () => {
             const newData = collectData();
             newData.push(["", "", ""]);
             renderRules(newData);
         };
-
         ruleList.onclick = (e) => {
-            if (e.target.classList.contains('remove') && e.target.id !== 'reset-settings-btn') {
+            if (e.target.classList.contains('remove') && e.target.id !== 'reset-settings-btn' && e.target.id !== 'delete-all-btn') {
                 e.target.closest('.rule-item').remove();
             }
         };
-
         saveBtn.onclick = () => {
             const dataToSave = collectData();
             if (dataToSave.length > 0) {
@@ -671,7 +654,6 @@
                 alert("Сохранение отменено.");
             }
         };
-
         resetBtn.onclick = () => {
             if (confirm("Сбросить запахи на дефолтные?")) {
                 resetData();
@@ -679,14 +661,19 @@
                 alert("Запахи сброшены.");
             }
         };
-
+        deleteAllBtn.onclick = () => {
+            if (confirm("Удалить все запахи?")) {
+                renderRules([]);
+                gmSetValueSync(STORAGE_KEY, "[]");
+                alert("Все запахи удалены.");
+            }
+        };
         renderRules(currentData);
     };
 
     const waitForElement = (selector) => new Promise(resolve => {
         const element = document.querySelector(selector);
         if (element) return resolve(element);
-
         const observer = new MutationObserver((_, obs) => {
             const el = document.querySelector(selector);
             if (el) {
