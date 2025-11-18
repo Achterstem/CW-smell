@@ -56,7 +56,7 @@
 
     const DEFAULT_RULES = [
         // ЗАСТЫВШАЯ ЭПОХА
-        ['odoroj/232.png', 'Провидец времени', 'odoroj/432.png'],
+        ['odoroj/232.png', 'Провидец Времени', 'odoroj/432.png'],
         ['odoroj/232.png', 'Провидица Времени', 'odoroj/432.png'],
         ['odoroj/232.png', 'Наследник', 'odoroj/432.png'],
         ['odoroj/232.png', 'Наследница', 'odoroj/432.png'],
@@ -192,12 +192,12 @@
         ['odoroj/150.png', 'Шёпот Мару', 'odoroj/452.png'],
         ['odoroj/150.png', 'Шёпот Исины', 'odoroj/452.png'],
         ['odoroj/150.png', 'Шёпот Калао', 'odoroj/452.png'],
-        ['odoroj/150.png', 'Благословенный Мару', 'odoroj/452.png'],
-        ['odoroj/150.png', 'Благословенный Исины', 'odoroj/452.png'],
-        ['odoroj/150.png', 'Благословенный Калао', 'odoroj/452.png'],
-        ['odoroj/150.png', 'Благословенная Мару', 'odoroj/452.png'],
-        ['odoroj/150.png', 'Благословенная Исины', 'odoroj/452.png'],
-        ['odoroj/150.png', 'Благословенная Калао', 'odoroj/452.png'],
+        ['odoroj/150.png', 'Благословлённый Мару', 'odoroj/452.png'],
+        ['odoroj/150.png', 'Благословлённый Исины', 'odoroj/452.png'],
+        ['odoroj/150.png', 'Благословлённый Калао', 'odoroj/452.png'],
+        ['odoroj/150.png', 'Благословлённая Мару', 'odoroj/452.png'],
+        ['odoroj/150.png', 'Благословлённая Исины', 'odoroj/452.png'],
+        ['odoroj/150.png', 'Благословлённая Калао', 'odoroj/452.png'],
         ['odoroj/150.png', 'Последователь Мару', 'odoroj/452.png'],
         ['odoroj/150.png', 'Последователь Исины', 'odoroj/452.png'],
         ['odoroj/150.png', 'Последователь Калао', 'odoroj/452.png'],
@@ -213,6 +213,8 @@
         ['odoroj/150.png', 'Малютка', 'odoroj/452.png'],
         ['odoroj/150.png', 'Чужеземец', 'odoroj/452.png'],
         ['odoroj/150.png', 'Чужеземка', 'odoroj/452.png'],
+        ['odoroj/150.png', 'Искатель стези', 'odoroj/452.png'],
+        ['odoroj/150.png', 'Искательница стези', 'odoroj/452.png'],
 
         // КАССИОПЕЯ
         ['odoroj/403.png', 'Созидатель звёзд', 'odoroj/456.png'],
