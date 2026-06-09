@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CW smell
 // @namespace    http://tampermonkey.net/
-// @version      1.0.10
+// @version      1.0.11
 // @description  Меняет запахи по исходному запаху + по имени/статусу/должности.
 // @author       achterstem
 // @match        http*://*.catwar.net/*
@@ -311,8 +311,8 @@
         ['odoroj/403.png', 'Создание Яо-ху', 'odoroj/352.png'],
 
         // мои тесты
-        ['odoroj/403.png', 'Гильотина', 'https://e.radikal.host/2025/11/11/ZPK27fc936d42ab4cef.png'],
-        ['odoroj/403.png', 'Чёрт, Фраудхарт', 'https://e.radikal.host/2025/11/11/ZPK27fc936d42ab4cef.png']
+        ['odoroj/403.png', 'Гильотина', 'https://raw.githubusercontent.com/Achterstem/host/refs/heads/main/img/zpkh.png'],
+        ['odoroj/403.png', 'Чёрт, Фраудхарт', 'https://raw.githubusercontent.com/Achterstem/host/refs/heads/main/img/zpkh.png']
     ];
 
     let ALL_ORIGINAL_SMELLS = [];
