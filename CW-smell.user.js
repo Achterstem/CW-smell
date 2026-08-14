@@ -242,28 +242,6 @@
         ['odoroj/403.png', 'Мерцающая Сегин', 'odoroj/456.png'],
         ['odoroj/403.png', 'Мерцающая Рукбах', 'odoroj/456.png'],
 
-        // НЕБОЖИТЕЛИ
-        ['odoroj/403.png', 'Небожитель', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Даочжан', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Владыка', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Этот Достопочтенный', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Несущий Бедствия', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Наступающий На Бессмертных', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Бог Войны Юго-Востока', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Дух Созвездия Хуагай', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Забытая Госпожа', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Повелитель Воды', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Молодой Господин Проливший Вино', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Змей-Лун', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Танцующий Среди Ликорисов', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Скрывающийся в Сумерках Охотник', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Дух поветрия', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Междумирец', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Созерцающий пустоту', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Упрямый Юноша', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Дитя пустоты', 'odoroj/448.png'],
-        ['odoroj/403.png', 'Посмешище трех миров', 'odoroj/448.png'],
-
         // ХРАМ ЯО-ХУ
         ['odoroj/403.png', 'Созерцатель душ', 'odoroj/352.png'],
         ['odoroj/403.png', 'Созерцательница душ', 'odoroj/352.png'],
