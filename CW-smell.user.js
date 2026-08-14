@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         CW smell (Optimized)
+// @name         CW smell
 // @namespace    http://tampermonkey.net/
 // @version      2.0.0
 // @description  Меняет запахи по исходному запаху + по имени/статусу/должности. Оптимизированная версия.
