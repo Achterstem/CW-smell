@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         CW smell
+// @name         CW smell (Optimized)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.11
-// @description  Меняет запахи по исходному запаху + по имени/статусу/должности.
+// @version      2.0.0
+// @description  Меняет запахи по исходному запаху + по имени/статусу/должности. Оптимизированная версия.
 // @author       achterstem
 // @match        http*://*.catwar.net/*
 // @match        http*://*.catwar.su/*
@@ -22,6 +22,8 @@
     'use strict';
 
     const STORAGE_KEY = 'CUSTOM_SMELLS_DATA';
+    const BATCH_SIZE = 10; // Количество клеток для обработки за один раз
+    const UPDATE_DELAY = 100; // Задержка между обновлениями в мс
 
     const gmGetValueSync = (key, defaultValue) => {
         if (typeof GM_getValue === 'function') {
@@ -240,6 +242,28 @@
         ['odoroj/403.png', 'Мерцающая Сегин', 'odoroj/456.png'],
         ['odoroj/403.png', 'Мерцающая Рукбах', 'odoroj/456.png'],
 
+        // НЕБОЖИТЕЛИ
+        ['odoroj/403.png', 'Небожитель', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Даочжан', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Владыка', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Этот Достопочтенный', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Несущий Бедствия', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Наступающий На Бессмертных', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Бог Войны Юго-Востока', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Дух Созвездия Хуагай', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Забытая Госпожа', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Повелитель Воды', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Молодой Господин Проливший Вино', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Змей-Лун', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Танцующий Среди Ликорисов', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Скрывающийся в Сумерках Охотник', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Дух поветрия', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Междумирец', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Созерцающий пустоту', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Упрямый Юноша', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Дитя пустоты', 'odoroj/448.png'],
+        ['odoroj/403.png', 'Посмешище трех миров', 'odoroj/448.png'],
+
         // ХРАМ ЯО-ХУ
         ['odoroj/403.png', 'Созерцатель душ', 'odoroj/352.png'],
         ['odoroj/403.png', 'Созерцательница душ', 'odoroj/352.png'],
@@ -266,78 +290,139 @@
         ['odoroj/403.png', 'Чёрт, Фраудхарт', 'https://raw.githubusercontent.com/Achterstem/host/refs/heads/main/img/zpkh.png']
     ];
 
-    let ALL_ORIGINAL_SMELLS = [];
-    let CUSTOM_TO_BASE_SMELL_MAP = new Map();
+    // Оптимизированная структура данных для быстрого поиска
+    class SmellRuleEngine {
+        constructor(rules) {
+            this.rules = rules;
+            this.cache = new Map();
+            this.customToBaseMap = new Map();
+            this.smellIndex = new Map(); // Индекс для быстрого поиска по запаху
+            this.phraseIndex = new Map(); // Индекс для быстрого поиска по фразе
+            this.buildIndexes();
+        }
+
+        buildIndexes() {
+            // Очищаем индексы
+            this.smellIndex.clear();
+            this.phraseIndex.clear();
+            this.customToBaseMap.clear();
+
+            this.rules.forEach(([oldSmell, phrase, newSmell]) => {
+                if (oldSmell && newSmell) {
+                    const canonicalBaseSmell = oldSmell.split('/').slice(-2).join('/');
+                    
+                    // Индекс по запаху
+                    if (!this.smellIndex.has(canonicalBaseSmell)) {
+                        this.smellIndex.set(canonicalBaseSmell, []);
+                    }
+                    this.smellIndex.get(canonicalBaseSmell).push({ phrase, newSmell, oldSmell });
+
+                    // Индекс по фразе (для быстрого поиска)
+                    const normalizedPhrase = phrase.toLowerCase().trim();
+                    if (!this.phraseIndex.has(normalizedPhrase)) {
+                        this.phraseIndex.set(normalizedPhrase, []);
+                    }
+                    this.phraseIndex.get(normalizedPhrase).push({ oldSmell, newSmell });
+
+                    this.customToBaseMap.set(newSmell, oldSmell);
+                }
+            });
+        }
+
+        getMatchingImage(text, canonicalBaseSmell) {
+            // Проверка кэша
+            const cacheKey = `${canonicalBaseSmell}|${text}`;
+            if (this.cache.has(cacheKey)) {
+                return this.cache.get(cacheKey);
+            }
+
+            const normalizedText = text.toLowerCase().replace(/\s+/g, ' ').trim();
+            
+            // Ищем только правила для этого запаха
+            const rulesForSmell = this.smellIndex.get(canonicalBaseSmell);
+            if (!rulesForSmell) {
+                return { newSmell: null, originalBase: null };
+            }
+
+            // Быстрый поиск по точному совпадению фразы
+            for (const rule of rulesForSmell) {
+                const normalizedPhrase = rule.phrase.toLowerCase().trim();
+                if (normalizedText.includes(normalizedPhrase)) {
+                    const result = { 
+                        newSmell: rule.newSmell, 
+                        originalBase: rule.oldSmell 
+                    };
+                    this.cache.set(cacheKey, result);
+                    return result;
+                }
+            }
+
+            const result = { newSmell: null, originalBase: null };
+            this.cache.set(cacheKey, result);
+            return result;
+        }
+
+        getOriginalBaseForCustom(customSmell) {
+            return this.customToBaseMap.get(customSmell) || null;
+        }
+
+        clearCache() {
+            this.cache.clear();
+        }
+    }
+
+    let ruleEngine = null;
+    let updateTimeout = null;
+    let pendingUpdates = new Set();
 
     const loadData = () => {
         let storedData = gmGetValueSync(STORAGE_KEY, null);
-
         let rules;
+
         try {
             rules = storedData ? JSON.parse(storedData) : DEFAULT_RULES;
-
         } catch (e) {
             console.error("Возврат дефолта.", e);
             rules = DEFAULT_RULES;
         }
 
-        const originalSmellsSet = new Set();
-        CUSTOM_TO_BASE_SMELL_MAP.clear();
-
-        rules.forEach(([oldSmell, phrase, newSmell]) => {
-            if (oldSmell && newSmell) {
-                const canonicalBaseSmell = oldSmell.split('/').slice(-2).join('/');
-                originalSmellsSet.add(canonicalBaseSmell);
-
-                CUSTOM_TO_BASE_SMELL_MAP.set(newSmell, oldSmell);
-            }
-        });
-
-        ALL_ORIGINAL_SMELLS = Array.from(originalSmellsSet);
+        ruleEngine = new SmellRuleEngine(rules);
         return rules;
     };
 
     const saveData = (data) => {
         if (confirm("Сохранить запахи?")) {
             gmSetValueSync(STORAGE_KEY, JSON.stringify(data));
+            ruleEngine = new SmellRuleEngine(data);
+            ruleEngine.clearCache();
+            // Обновляем все клетки после сохранения
+            document.querySelectorAll('.cage').forEach(cage => {
+                applySmellsToCage(cage);
+            });
         }
     };
 
     const resetData = () => {
         gmDeleteValueSync(STORAGE_KEY);
-    };
-
-
-    const phraseInText = (text, phrase) => {
-        const normalizedText = text.toLowerCase().replace(/\s+/g, ' ').trim();
-        const normalizedPhrase = phrase.toLowerCase().trim();
-
-        return normalizedText.includes(normalizedPhrase);
-    };
-
-    const getMatchingImage = (text, canonicalBaseSmell, rules) => {
-        for (const [oldSmell, phrase, newImg] of rules) {
-            const ruleCanonicalSmell = oldSmell.split('/').slice(-2).join('/');
-
-            if (canonicalBaseSmell.endsWith(ruleCanonicalSmell.split('/').pop())) {
-                if (phraseInText(text, phrase)) {
-                    return { newSmell: newImg, originalBase: oldSmell };
-                }
-            }
-        }
-        return { newSmell: null, originalBase: null };
+        ruleEngine = new SmellRuleEngine(DEFAULT_RULES);
+        ruleEngine.clearCache();
+        document.querySelectorAll('.cage').forEach(cage => {
+            applySmellsToCage(cage);
+        });
     };
 
     const ORIGINAL_SRC_ATTRIBUTE = 'data-original-smell';
     const CURRENT_CAT_ID_ATTRIBUTE = 'data-cat-id';
+    const PROCESSED_ATTRIBUTE = 'data-smell-processed';
 
-    const applySmellsToCage = (cage, rules) => {
+    const applySmellsToCage = (cage) => {
+        if (!cage || cage.closest('.invisible')) return;
+
         const img = cage.querySelector('img[src*="odoroj/"], img[data-original-smell]');
-        const catNameElement = cage.querySelector('a');
-
+        const catNameElement = cage.querySelector('a.cat_link');
+        
         if (!img || !catNameElement) return;
 
-        let currentFullRelativeSrc = img.getAttribute('src');
         const textContent = (cage.querySelector('span') || { innerText: '' }).innerText + ' ' + catNameElement.textContent.trim();
 
         const catUrl = catNameElement.href;
@@ -345,143 +430,182 @@
         const currentCatId = match ? match[1] : null;
         const cachedCatId = img.getAttribute(CURRENT_CAT_ID_ATTRIBUTE);
 
-        const hasCustomSrc = CUSTOM_TO_BASE_SMELL_MAP.has(currentFullRelativeSrc);
-
-
+        // Получаем текущий src
+        let currentFullRelativeSrc = img.getAttribute('src');
+        const hasCustomSrc = ruleEngine.customToBaseMap.has(currentFullRelativeSrc);
+        
         let originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE);
 
+        // Проверяем, нужно ли обрабатывать эту клетку
         if (!originalSrc) {
-             originalSrc = currentFullRelativeSrc;
-             img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
-             img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
-
+            originalSrc = currentFullRelativeSrc;
+            img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
+            img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+            img.setAttribute(PROCESSED_ATTRIBUTE, 'true');
         } else if (currentCatId !== cachedCatId) {
-             if (hasCustomSrc) {
-                 img.src = originalSrc;
-                 currentFullRelativeSrc = originalSrc;
-             }
-
-             img.removeAttribute(ORIGINAL_SRC_ATTRIBUTE);
-
-             img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
-             return applySmellsToCage(cage, rules);
-
+            // Клетка изменилась - сбрасываем состояние
+            if (hasCustomSrc) {
+                img.src = originalSrc;
+                currentFullRelativeSrc = originalSrc;
+            }
+            img.removeAttribute(ORIGINAL_SRC_ATTRIBUTE);
+            img.removeAttribute(PROCESSED_ATTRIBUTE);
+            img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+            return applySmellsToCage(cage);
         } else if (hasCustomSrc) {
-             const baseSmellForCustom = CUSTOM_TO_BASE_SMELL_MAP.get(currentFullRelativeSrc);
-             const matchingResult = getMatchingImage(textContent, baseSmellForCustom, rules);
-
-             if (!matchingResult.newSmell || matchingResult.newSmell !== currentFullRelativeSrc) {
-                 img.src = originalSrc;
-                 currentFullRelativeSrc = originalSrc;
-             }
+            // Проверяем, не изменился ли текст или статус
+            const baseSmellForCustom = ruleEngine.getOriginalBaseForCustom(currentFullRelativeSrc);
+            if (baseSmellForCustom) {
+                const canonicalBaseSmell = baseSmellForCustom.split('/').slice(-2).join('/');
+                const matchingResult = ruleEngine.getMatchingImage(textContent, canonicalBaseSmell);
+                
+                if (!matchingResult.newSmell || matchingResult.newSmell !== currentFullRelativeSrc) {
+                    img.src = originalSrc;
+                    currentFullRelativeSrc = originalSrc;
+                    img.removeAttribute(PROCESSED_ATTRIBUTE);
+                }
+            }
         }
 
         originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE) || currentFullRelativeSrc;
-
         const originalSrcPart = originalSrc.split('/').slice(-2).join('/');
 
-        const matchingResult = getMatchingImage(textContent, originalSrcPart, rules);
-
+        const matchingResult = ruleEngine.getMatchingImage(textContent, originalSrcPart);
+        
         let targetSrc = originalSrc;
-
         if (matchingResult.newSmell) {
             targetSrc = matchingResult.newSmell;
         }
 
         if (targetSrc && targetSrc !== img.src) {
             img.src = targetSrc;
+            img.setAttribute(PROCESSED_ATTRIBUTE, 'true');
         }
+    };
+
+    // Пакетная обработка клеток
+    const processBatch = (cages) => {
+        const batch = Array.from(cages);
+        for (let i = 0; i < batch.length; i += BATCH_SIZE) {
+            const chunk = batch.slice(i, i + BATCH_SIZE);
+            chunk.forEach(cage => {
+                if (!cage.getAttribute('data-smell-updated')) {
+                    applySmellsToCage(cage);
+                    cage.setAttribute('data-smell-updated', 'true');
+                }
+            });
+        }
+    };
+
+    // Дебаунс для обновлений
+    const scheduleUpdate = (cage) => {
+        if (cage) {
+            pendingUpdates.add(cage);
+            cage.removeAttribute('data-smell-updated');
+        }
+
+        if (updateTimeout) {
+            clearTimeout(updateTimeout);
+        }
+
+        updateTimeout = setTimeout(() => {
+            if (pendingUpdates.size > 0) {
+                processBatch(pendingUpdates);
+                pendingUpdates.clear();
+            }
+            updateTimeout = null;
+        }, UPDATE_DELAY);
     };
 
     const initSmellObservers = () => {
-        const rules = loadData();
+        loadData();
 
         const mapContainer = document.querySelector('#ist, #cages_div');
         if (!mapContainer) {
-             return;
+            return;
         }
 
-        const observers = [];
+        // Первоначальная обработка всех клеток пакетами
+        const allCages = document.querySelectorAll('.cage');
+        processBatch(allCages);
 
-        const setupCageObserver = (cage) => {
-            const img = cage.querySelector('img[src*="odoroj/"]');
-            const catNameElement = cage.querySelector('a');
-            const targetSpan = cage.querySelector('span');
+        // Оптимизированный MutationObserver
+        let observerTimeout = null;
+        const observer = new MutationObserver((mutationsList) => {
+            let hasChanges = false;
+            const changedCages = new Set();
 
-            if (!img || !catNameElement || !targetSpan) return;
-
-            applySmellsToCage(cage, rules);
-
-            const cageObserver = new MutationObserver((mutationsList) => {
-                let shouldApply = false;
-
-                for (const mutation of mutationsList) {
-                    if (mutation.type === 'childList' || mutation.type === 'characterData') {
-                        shouldApply = true;
-                        break;
-                    }
-                    if (mutation.type === 'attributes' && mutation.attributeName === 'href') {
-                        shouldApply = true;
-                        break;
-                    }
-                }
-
-                if (shouldApply) {
-                    applySmellsToCage(cage, rules);
-                }
-            });
-
-            cageObserver.observe(targetSpan, {
-                childList: true,
-                subtree: true,
-                characterData: true,
-                attributes: true
-            });
-
-            cageObserver.observe(catNameElement, {
-                attributes: true,
-                attributeFilter: ['href']
-            });
-
-            observers.push(cageObserver);
-        };
-
-        document.querySelectorAll('.cage').forEach(setupCageObserver);
-
-        const mapChangeObserver = new MutationObserver((mutationsList) => {
-            mutationsList.forEach(mutation => {
+            for (const mutation of mutationsList) {
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach(node => {
-                        if (node.nodeType === 1 && node.classList.contains('cage')) {
-                            setupCageObserver(node);
+                        if (node.nodeType === 1) {
+                            if (node.classList && node.classList.contains('cage')) {
+                                changedCages.add(node);
+                            }
+                            // Поиск .cage внутри добавленного узла
+                            const nestedCages = node.querySelectorAll ? node.querySelectorAll('.cage') : [];
+                            nestedCages.forEach(cage => changedCages.add(cage));
                         }
                     });
 
+                    // Проверяем обновленные клетки
                     document.querySelectorAll('.cage').forEach(cage => {
-                        applySmellsToCage(cage, rules);
+                        if (!cage.getAttribute('data-smell-processed')) {
+                            changedCages.add(cage);
+                        }
                     });
                 }
-            });
+
+                if (mutation.type === 'attributes' && mutation.target.closest) {
+                    const cage = mutation.target.closest('.cage');
+                    if (cage && mutation.attributeName === 'href') {
+                        changedCages.add(cage);
+                        cage.removeAttribute('data-smell-updated');
+                    }
+                }
+
+                if (mutation.type === 'characterData' && mutation.target.parentElement) {
+                    const cage = mutation.target.closest('.cage');
+                    if (cage) {
+                        changedCages.add(cage);
+                        cage.removeAttribute('data-smell-updated');
+                    }
+                }
+            }
+
+            if (changedCages.size > 0) {
+                if (observerTimeout) {
+                    clearTimeout(observerTimeout);
+                }
+                observerTimeout = setTimeout(() => {
+                    processBatch(changedCages);
+                    observerTimeout = null;
+                }, 50);
+            }
         });
 
-        mapChangeObserver.observe(mapContainer, {
+        observer.observe(mapContainer, {
             childList: true,
-            subtree: true
+            subtree: true,
+            attributes: true,
+            characterData: true,
+            attributeFilter: ['href']
         });
 
-        window.smellObservers = observers;
+        window.smellObserver = observer;
     };
-
 
     // --- НАСТРОЙКИ ---
     const createSettingsInterface = () => {
         const currentData = loadData();
         const siteTable = document.querySelector("#site_table");
         if (!siteTable) return;
+
         const settingsContainer = siteTable.getAttribute("data-mobile") === "0"
             ? document.querySelector("#branch")
             : siteTable;
         if (!settingsContainer) return;
+
         const style = document.createElement('style');
         style.innerHTML = `
             #smell-settings-panel {
@@ -516,6 +640,7 @@
             }
         `;
         document.head.appendChild(style);
+
         const panel = document.createElement('div');
         panel.id = 'smell-settings-panel';
         panel.innerHTML = `
@@ -539,12 +664,14 @@
                 * Можно вводить как и должности, так и имена.
             </p>
         `;
+
         const targetElement = document.querySelector('a[href="del"]');
         if (targetElement) {
             targetElement.insertAdjacentElement('afterend', panel);
         } else {
             settingsContainer.appendChild(panel);
         }
+
         const toggleBtn = panel.querySelector('#toggle-rules-btn');
         const listContent = panel.querySelector('#smell-list-content');
         const ruleList = panel.querySelector('#rule-list');
@@ -552,14 +679,12 @@
         const resetBtn = panel.querySelector('#reset-settings-btn');
         const deleteAllBtn = panel.querySelector('#delete-all-btn');
         const addBtn = panel.querySelector('#add-rule-btn');
+
         toggleBtn.onclick = () => {
             listContent.classList.toggle('hidden');
-            if (listContent.classList.contains('hidden')) {
-                toggleBtn.textContent = 'Развернуть';
-            } else {
-                toggleBtn.textContent = 'Свернуть';
-            }
+            toggleBtn.textContent = listContent.classList.contains('hidden') ? 'Развернуть' : 'Свернуть';
         };
+
         const renderRules = (data) => {
             ruleList.innerHTML = '';
             data.forEach(([oldSmell, phrase, image]) => {
@@ -574,6 +699,7 @@
                 ruleList.appendChild(item);
             });
         };
+
         const collectData = () => {
             const data = [];
             panel.querySelectorAll('.rule-item').forEach(item => {
@@ -584,16 +710,19 @@
             });
             return data;
         };
+
         addBtn.onclick = () => {
             const newData = collectData();
             newData.push(["", "", ""]);
             renderRules(newData);
         };
+
         ruleList.onclick = (e) => {
             if (e.target.classList.contains('remove') && e.target.id !== 'reset-settings-btn' && e.target.id !== 'delete-all-btn') {
                 e.target.closest('.rule-item').remove();
             }
         };
+
         saveBtn.onclick = () => {
             const dataToSave = collectData();
             if (dataToSave.length > 0) {
@@ -607,6 +736,7 @@
                 alert("Сохранение отменено.");
             }
         };
+
         resetBtn.onclick = () => {
             if (confirm("Сбросить запахи на дефолтные?")) {
                 resetData();
@@ -614,13 +744,28 @@
                 alert("Запахи сброшены.");
             }
         };
+
         deleteAllBtn.onclick = () => {
             if (confirm("Удалить все запахи?")) {
                 renderRules([]);
                 gmSetValueSync(STORAGE_KEY, "[]");
+                ruleEngine = new SmellRuleEngine([]);
+                ruleEngine.clearCache();
+                document.querySelectorAll('.cage').forEach(cage => {
+                    const img = cage.querySelector('img[data-original-smell]');
+                    if (img) {
+                        const originalSrc = img.getAttribute('data-original-smell');
+                        if (originalSrc) {
+                            img.src = originalSrc;
+                            img.removeAttribute('data-original-smell');
+                            img.removeAttribute('data-smell-processed');
+                        }
+                    }
+                });
                 alert("Все запахи удалены.");
             }
         };
+
         renderRules(currentData);
     };
 
