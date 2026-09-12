@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         CW smell (DEBUG PANEL)
+// @name         CW smell
 // @namespace    http://tampermonkey.net/
-// @version      1.0.17-debug1
-// @description  Временная отладочная сборка с видимой панелью логов для диагностики на мобильных браузерах.
+// @version      1.0.17
+// @description  Меняет запахи по исходному запаху + по имени/статусу/должности.
 // @author       achterstem
 // @match        http*://*.catwar.net/*
 // @match        http*://*.catwar.su/*
@@ -12,189 +12,450 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_listValues
+// @grant        GM_xmlhttpRequest
+// @grant        GM_openInTab
+// @grant        GM_info
+// @connect      raw.githubusercontent.com
+// @connect      github.com
 // @run-at       document-idle
+// @homepageURL  https://greasyfork.org/ru/scripts/555607-cw-smell
+// @downloadURL  https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
+// @updateURL    https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // ==================== ОТЛАДОЧНАЯ ПАНЕЛЬ ====================
-    // Показывает логи прямо на странице, потому что на телефоне обычно нет
-    // доступа к консоли разработчика. Не влияет на основную логику ниже.
-    const LOG_LINES = [];
-    const MAX_LOG_LINES = 300;
-    let logPanelEl = null;
-    let logTextEl = null;
-
-    const renderLog = () => {
-        if (!logTextEl) return;
-        logTextEl.textContent = LOG_LINES.join('\n');
-        logTextEl.scrollTop = logTextEl.scrollHeight;
-    };
-
-    const dlog = (msg) => {
-        const line = `[${new Date().toISOString().substr(11, 8)}] ${msg}`;
-        LOG_LINES.push(line);
-        if (LOG_LINES.length > MAX_LOG_LINES) LOG_LINES.shift();
-        renderLog();
-        try { console.log('[CW-smell-debug]', msg); } catch (e) {}
-    };
-
-    const createDebugPanel = () => {
-        const style = document.createElement('style');
-        style.innerHTML = `
-            #cwsmell-debug-panel {
-                position: fixed; left: 4px; right: 4px; bottom: 4px; z-index: 2147483647;
-                max-height: 40vh; background: rgba(10,10,10,0.92); color: #7CFC00;
-                font-family: monospace; font-size: 10px; line-height: 1.35;
-                border: 1px solid #444; border-radius: 6px; display: flex; flex-direction: column;
-            }
-            #cwsmell-debug-panel .cwsd-header {
-                display: flex; gap: 6px; padding: 4px 6px; background: #1a1a1a; border-bottom: 1px solid #444;
-                align-items: center; flex-wrap: wrap;
-            }
-            #cwsmell-debug-panel .cwsd-header span { color: #ccc; font-size: 10px; margin-right: auto; }
-            #cwsmell-debug-panel button {
-                font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid #666;
-                background: #2a2a2a; color: #eee;
-            }
-            #cwsmell-debug-panel .cwsd-body {
-                overflow-y: auto; padding: 4px 6px; white-space: pre-wrap; word-break: break-all;
-            }
-            #cwsmell-debug-panel.collapsed .cwsd-body { display: none; }
-        `;
-        document.head.appendChild(style);
-
-        const panel = document.createElement('div');
-        panel.id = 'cwsmell-debug-panel';
-        panel.innerHTML = `
-            <div class="cwsd-header">
-                <span>CW-smell DEBUG</span>
-                <button type="button" id="cwsd-copy">Копировать</button>
-                <button type="button" id="cwsd-clear">Очистить</button>
-                <button type="button" id="cwsd-toggle">Свернуть</button>
-            </div>
-            <div class="cwsd-body"></div>
-        `;
-        document.documentElement.appendChild(panel);
-
-        logPanelEl = panel;
-        logTextEl = panel.querySelector('.cwsd-body');
-
-        panel.querySelector('#cwsd-clear').onclick = () => {
-            LOG_LINES.length = 0;
-            renderLog();
-        };
-        panel.querySelector('#cwsd-toggle').onclick = () => {
-            panel.classList.toggle('collapsed');
-        };
-        panel.querySelector('#cwsd-copy').onclick = () => {
-            const text = LOG_LINES.join('\n');
-            const finish = (ok) => {
-                const btn = panel.querySelector('#cwsd-copy');
-                const old = btn.textContent;
-                btn.textContent = ok ? 'Скопировано!' : 'Не вышло, выделите вручную';
-                setTimeout(() => { btn.textContent = old; }, 1500);
-            };
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(() => finish(true)).catch(() => finish(false));
-            } else {
-                try {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.position = 'fixed';
-                    ta.style.opacity = '0';
-                    document.body.appendChild(ta);
-                    ta.focus();
-                    ta.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(ta);
-                    finish(true);
-                } catch (e) {
-                    finish(false);
-                }
-            }
-        };
-
-        renderLog();
-    };
-
-    // Ловим ошибки, которые случаются вне наших try/catch (например если
-    // что-то на странице сломается из-за нашего кода) — иначе мы их не увидим.
-    window.addEventListener('error', (e) => {
-        dlog(`GLOBAL ERROR: ${e.message} @ ${e.filename}:${e.lineno}`);
-    });
-
-    // ==================== ОСНОВНАЯ ЛОГИКА (как в рабочей версии) ====================
-
     const STORAGE_KEY = 'CUSTOM_SMELLS_DATA';
 
     const gmGetValueSync = (key, defaultValue) => {
         if (typeof GM_getValue === 'function') {
-            try { return GM_getValue(key, defaultValue); } catch (e) { dlog('gmGetValue error: ' + e.message); }
+            try {
+                return GM_getValue(key, defaultValue);
+            } catch (e) {
+                console.error("Возврат дефолта.", e);
+            }
         }
         return defaultValue;
     };
+
+    const gmSetValueSync = (key, value) => {
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(key, value);
+            } catch (e) {
+                console.error("Сохранение не выполнено.", e);
+            }
+        }
+    };
+
+    const gmDeleteValueSync = (key) => {
+        if (typeof GM_deleteValue === 'function') {
+            try {
+                GM_deleteValue(key);
+            } catch (e) {
+                console.error("Удаление не выполнено.", e);
+            }
+        }
+    };
+
+    const DOWNLOAD_URL = 'https://github.com/Achterstem/CW-smell/raw/refs/heads/main/CW-smell.user.js';
+
+    const openUrlInNewTab = (url) => {
+        if (typeof GM_openInTab === 'function') {
+            try {
+                GM_openInTab(url, { active: true, insert: true, setParent: true });
+                return;
+            } catch (e) {
+                console.error("GM_openInTab не сработал, пробуем window.open.", e);
+            }
+        }
+        window.open(url, '_blank');
+    };
+
+    // Сравнение версий вида "1.0.15" по числовым сегментам (а не по строке
+    // целиком), чтобы, например, "1.0.9" считалась ниже "1.0.10".
+    const isVersionNewer = (remote, local) => {
+        const toParts = (v) => String(v).trim().split('.').map(n => parseInt(n, 10) || 0);
+        const remoteParts = toParts(remote);
+        const localParts = toParts(local);
+        const len = Math.max(remoteParts.length, localParts.length);
+        for (let i = 0; i < len; i++) {
+            const r = remoteParts[i] || 0;
+            const l = localParts[i] || 0;
+            if (r > l) return true;
+            if (r < l) return false;
+        }
+        return false;
+    };
+
+    const extractVersionFromSource = (source) => {
+        const match = /@version\s+([\d.]+)/.exec(source || '');
+        return match ? match[1] : null;
+    };
+
+    // Запрашивает актуальный текст скрипта из репозитория и достаёт из него
+    // @version. GM_xmlhttpRequest нужен вместо fetch, так как обычный fetch
+    // упрётся в CORS на GitHub из контекста страницы catwar.
+    const fetchRemoteVersion = () => new Promise((resolve, reject) => {
+        if (typeof GM_xmlhttpRequest !== 'function') {
+            reject(new Error('GM_xmlhttpRequest недоступен'));
+            return;
+        }
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: `${DOWNLOAD_URL}${DOWNLOAD_URL.includes('?') ? '&' : '?'}_ts=${Date.now()}`,
+            headers: { 'Cache-Control': 'no-cache' },
+            onload: (response) => {
+                if (response.status >= 200 && response.status < 300) {
+                    const version = extractVersionFromSource(response.responseText);
+                    if (version) {
+                        resolve(version);
+                    } else {
+                        reject(new Error('Не удалось найти версию в ответе'));
+                    }
+                } else {
+                    reject(new Error(`HTTP ${response.status}`));
+                }
+            },
+            onerror: () => reject(new Error('Ошибка сети')),
+            ontimeout: () => reject(new Error('Превышено время ожидания')),
+            timeout: 15000
+        });
+    });
 
     const DEFAULT_CATEGORIES = [
         {
             name: 'ЗАСТЫВШАЯ ЭПОХА',
             rules: [
                 ['232', 'Провидец Времени', '432'],
+                ['232', 'Провидица Времени', '432'],
                 ['232', 'Наследник', '432'],
+                ['232', 'Наследница', '432'],
                 ['232', 'Верховодец', '432'],
+                ['232', 'Сказитель', '432'],
+                ['232', 'Сказительница', '432'],
+                ['232', 'Егерь', '432'],
                 ['232', 'Старший Отец', '432'],
+                ['232', 'Старшая Матерь', '432'],
+                ['232', 'Знахарь', '432'],
+                ['232', 'Последователь Знахаря', '432'],
+                ['232', 'Последовательница Знахаря', '432'],
+                ['232', 'Вояка', '432'],
+                ['232', 'Добытчик', '432'],
+                ['232', 'Добытчица', '432'],
+                ['232', 'Заботливый Отец', '432'],
+                ['232', 'Заботливая Матерь', '432'],
+                ['232', 'Последователь', '432'],
+                ['232', 'Последовательница', '432'],
+                ['232', 'Постигающий', '432'],
+                ['232', 'Постигающая', '432'],
+                ['232', 'Новорожденное Дитя', '432'],
+                ['232', 'Старец', '432'],
+                ['232', 'Старица', '432'],
+            ]
+        },
+        {
+            name: 'ПЛЕМЯ ТУМАННОГО ЗАЛИВА',
+            rules: [
+                ['232', 'возрождённый', '177'],
+                ['232', 'возрождённая', '177'],
+                ['232', 'воспитанник', '177'],
+                ['232', 'воспитанница', '177'],
+                ['232', 'преданный Моря', '177'],
+                ['232', 'преданная Моря', '177'],
+                ['232', 'старший преданный Моря', '177'],
+                ['232', 'старшая преданная Моря', '177'],
+                ['232', 'поверенный', '177'],
+                ['232', 'поверенная', '177'],
+                ['232', 'приближённый', '177'],
+                ['232', 'приближённая', '177'],
+                ['232', 'советник', '177'],
+                ['232', 'советница', '177'],
+                ['232', 'служитель Моря', '177'],
+                ['232', 'служительница Моря', '177'],
+                ['232', 'душа Моря', '177'],
+                ['232', 'неприкасаемый', '177'],
+                ['232', 'неприкасаемая', '177'],
+                ['232', 'сухопутный', '177'],
+                ['232', 'сухопутная', '177'],
+                ['232', 'очистившийся', '177'],
+                ['232', 'очистившаяся', '177'],
+                ['232', 'Помнящий', '177'],
+                ['232', 'Помнящая', '177'],
+                ['232', 'преемник Помнящего', '177'],
+                ['232', 'преемница Помнящего', '177'],
+                ['232', 'житель пещер', '177'],
+                ['232', 'жительница пещер', '177'],
+                ['232', 'представитель жителей пещер', '177'],
+                ['232', 'представительница жителей пещер', '177'],
+                ['232', 'житель скал', '177'],
+                ['232', 'жительница скал', '177'],
+                ['232', 'вождь жителей скал', '177'],
+            ]
+        },
+        {
+            name: 'СОШЕДШИЕ',
+            rules: [
+                ['232', 'Путешественник', '400'],
+                ['232', 'Путешественница', '400'],
+                ['232', 'Искатель приключений', '400'],
+                ['232', 'Искательница приключений', '400'],
+                ['232', 'Старший искатель приключений', '400'],
+                ['232', 'Старшая искательница приключений', '400'],
+                ['232', 'Рыцарь', '400'],
+                ['232', 'Цисин', '400'],
+                ['232', 'Издатель', '400'],
+                ['232', 'Мудрец', '400'],
+                ['232', 'Эйдолон', '400'],
+                ['232', 'Гладиатор', '400'],
+                ['232', 'Предвестник', '400'],
+                ['232', 'Анемо Архонт', '400'],
+                ['232', 'Гео Архонт', '400'],
+                ['232', 'Электро Архонт', '400'],
+                ['232', 'Дендро Архонт', '400'],
+                ['232', 'Гидро Архонт', '400'],
+                ['232', 'Пиро Архонт', '400'],
+                ['232', 'Крио Архонт', '400'],
+                ['232', 'Избранник небес', '400'],
+                ['232', 'Хранитель небесного порядка', '400'],
+                ['232', 'Маленькая океанида', '400'],
+                ['232', 'Таинственный натурфилософ', '400'],
+                ['232', 'Дракон рассвета и заката', '400'],
+                ['232', 'Дракон рассвета и заката', '400'],
+                ['232', 'Рыцарь Вечности', '400'],
+                ['232', 'Нечто из иного мира', '400'],
+                ['232', 'Странствующий звездочёт', '400'],
+            ]
+        },
+        {
+            name: 'АКАДЕМИЯ ХАУККА',
+            rules: [
+                ['232', 'Ректор', '466'],
+                ['232', 'Проректор', '466'],
+                ['232', 'Декан', '466'],
+                ['232', 'Социальный педагог', '466'],
+                ['232', 'Медбрат', '466'],
+                ['232', 'Медсестра', '466'],
+                ['232', 'Профессор', '466'],
+                ['232', 'Преподаватель', '466'],
+                ['232', 'Куратор', '466'],
+                ['232', 'Выпускник', '466'],
+                ['232', 'Студент', '466'],
+                ['232', 'Староста', '466'],
+                ['232', 'Астроном', '466'],
+                ['232', 'Большая шишка', '466'],
+                ['232', 'Гражданин', '466'],
             ]
         },
         {
             name: 'ОЗХ',
             rules: [
                 ['150', 'Вождь', '452'],
+                ['150', 'Преемник', '452'],
+                ['150', 'Преемница', '452'],
+                ['150', 'Голос Мару', '452'],
+                ['150', 'Шаман', '452'],
+                ['150', 'Голос Калао', '452'],
+                ['150', 'Шёпот Мару', '452'],
+                ['150', 'Шёпот Исины', '452'],
+                ['150', 'Шёпот Калао', '452'],
+                ['150', 'Благословлённый Мару', '452'],
+                ['150', 'Благословлённый Исиной', '452'],
+                ['150', 'Благословлённый Калао', '452'],
+                ['150', 'Благословлённая Мару', '452'],
+                ['150', 'Благословлённая Исиной', '452'],
+                ['150', 'Благословлённая Калао', '452'],
+                ['150', 'Последователь Мару', '452'],
+                ['150', 'Последователь Исины', '452'],
+                ['150', 'Последователь Калао', '452'],
+                ['150', 'Последовательница Мару', '452'],
+                ['150', 'Последовательница Исины', '452'],
+                ['150', 'Последовательница Калао', '452'],
+                ['150', 'Познающий Пути', '452'],
+                ['150', 'Познающая Пути', '452'],
+                ['150', 'Благословенный Шакти', '452'],
+                ['150', 'Благословенная Шакти', '452'],
+                ['150', 'Завершивший Путь', '452'],
+                ['150', 'Завершившая Путь', '452'],
                 ['150', 'Малютка', '452'],
+                ['150', 'Чужеземец', '452'],
+                ['150', 'Чужеземка', '452'],
+                ['150', 'Искатель стези', '452'],
+                ['150', 'Искательница стези', '452'],
+            ]
+        },
+        {
+            name: 'КАССИОПЕЯ',
+            rules: [
+                ['403', 'Созидатель звёзд', '456'],
+                ['403', 'Избранник Нави', '456'],
+                ['403', 'Избранник Шедар', '456'],
+                ['403', 'Избранник Каф', '456'],
+                ['403', 'Избранник Сегин', '456'],
+                ['403', 'Избранник Рукбах', '456'],
+                ['403', 'Приближенный Нави', '456'],
+                ['403', 'Приближенный Шедар', '456'],
+                ['403', 'Приближенный Сегин', '456'],
+                ['403', 'Приближенный Рукбах', '456'],
+                ['403', 'Матушка-Плеяда', '456'],
+                ['403', 'Гордость звездных предков', '456'],
+                ['403', 'Сияние Нави', '456'],
+                ['403', 'Сияние Шедар', '456'],
+                ['403', 'Сияние Каф', '456'],
+                ['403', 'Сияние Сегин', '456'],
+                ['403', 'Сияние Рукбах', '456'],
+                ['403', 'Мерцающий Нави', '456'],
+                ['403', 'Мерцающий Шедар', '456'],
+                ['403', 'Мерцающий Каф', '456'],
+                ['403', 'Мерцающий Сегин', '456'],
+                ['403', 'Мерцающий Рукбах', '456'],
+                ['403', 'Искорка', '456'],
+                ['403', 'Созидательница звёзд', '456'],
+                ['403', 'Избранница Нави', '456'],
+                ['403', 'Избранница Шедар', '456'],
+                ['403', 'Избранница Каф', '456'],
+                ['403', 'Избранница Сегин', '456'],
+                ['403', 'Избранница Рукбах', '456'],
+                ['403', 'Приближенная Нави', '456'],
+                ['403', 'Приближенная Шедар', '456'],
+                ['403', 'Приближенная Сегин', '456'],
+                ['403', 'Приближенная Рукбах', '456'],
+                ['403', 'Мерцающая Нави', '456'],
+                ['403', 'Мерцающая Шедар', '456'],
+                ['403', 'Мерцающая Каф', '456'],
+                ['403', 'Мерцающая Сегин', '456'],
+                ['403', 'Мерцающая Рукбах', '456'],
+            ]
+        },
+        {
+            name: 'НЕБОЖИТЕЛИ',
+            rules: [
+                ['403', 'Небожитель', '448'],
+                ['403', 'Даочжан', '448'],
+                ['403', 'Владыка', '448'],
+                ['403', 'Этот Достопочтенный', '448'],
+                ['403', 'Несущий Бедствия', '448'],
+                ['403', 'Наступающий На Бессмертных', '448'],
+                ['403', 'Бог Войны Юго-Востока', '448'],
+                ['403', 'Дух Созвездия Хуагай', '448'],
+                ['403', 'Забытая Госпожа', '448'],
+                ['403', 'Повелитель Воды', '448'],
+                ['403', 'Молодой Господин Проливший Вино', '448'],
+                ['403', 'Змей-Лун', '448'],
+                ['403', 'Танцующий Среди Ликорисов', '448'],
+                ['403', 'Скрывающийся в Сумерках Охотник', '448'],
+                ['403', 'Дух поветрия', '448'],
+                ['403', 'Междумирец', '448'],
+                ['403', 'Созерцающий пустоту', '448'],
+                ['403', 'Упрямый Юноша', '448'],
+                ['403', 'Дитя пустоты', '448'],
+                ['403', 'Посмешище трех миров', '448'],
+            ]
+        },
+        {
+            name: 'ХРАМ ЯО-ХУ',
+            rules: [
+                ['403', 'Созерцатель душ', '352'],
+                ['403', 'Созерцательница душ', '352'],
+                ['403', 'Изучающий Души', '352'],
+                ['403', 'Изучающая Души', '352'],
+                ['403', 'Послушник', '352'],
+                ['403', 'Послушница', '352'],
+                ['403', 'Адепт', '352'],
+                ['403', 'Глава ветви Фэн', '352'],
+                ['403', 'Глава ветви Пэй', '352'],
+                ['403', 'Глава ветви Вэй', '352'],
+                ['403', 'Глава ветви Цао', '352'],
+                ['403', 'Первый ученик Фэн', '352'],
+                ['403', 'Первая ученица Фэн', '352'],
+                ['403', 'Первый ученик Вэй', '352'],
+                ['403', 'Первая ученица Вэй', '352'],
+                ['403', 'Первый ученик Пэй', '352'],
+                ['403', 'Первая ученица Пэй', '352'],
+                ['403', 'Первый ученик Цао', '352'],
+                ['403', 'Первая ученица Цао', '352'],
             ]
         },
     ];
-    // ВНИМАНИЕ: в этой отладочной сборке DEFAULT_CATEGORIES сокращён до нескольких
-    // тестовых правил специально, чтобы упростить чтение логов. Полный список
-    // правил из рабочей версии сюда не переносился — эта сборка только для
-    // диагностики механики (находит ли скрипт клетки, ловит ли события, меняется
-    // ли src), а не для реального использования на карте.
 
-    const DEFAULT_RULES = DEFAULT_CATEGORIES.reduce((acc, cat) => acc.concat(cat.rules), []);
+    // Правила ниже раньше жили в отдельной категории 'Мои тесты' в панели
+    // настроек. Теперь это обычные пользовательские правила по умолчанию —
+    // они не регистрируются в CATEGORY_LOOKUP, поэтому попадают в общую
+    // группу 'Другое', как и любые правила, добавленные вручную.
+    const EXTRA_DEFAULT_RULES = [
+        ['403', 'Гильотина', 'https://raw.githubusercontent.com/Achterstem/host/refs/heads/main/img/zpkh.png'],
+        ['403', 'Чёрт, Фраудхарт', 'https://raw.githubusercontent.com/Achterstem/host/refs/heads/main/img/zpkh.png'],
+    ];
 
+    const DEFAULT_RULES = DEFAULT_CATEGORIES.reduce((acc, cat) => acc.concat(cat.rules), []).concat(EXTRA_DEFAULT_RULES);
+
+    // Позволяет вводить в настройках просто id запаха (цифры), тогда путь
+    // соберётся автоматически как odoroj/<id>.png. Если введено что-то ещё
+    // (например полная ссылка на картинку) — используется как есть, без изменений.
     const normalizeSmellValue = (value) => {
         if (!value) return value;
         const trimmed = value.trim();
-        if (/^\d+$/.test(trimmed)) return `odoroj/${trimmed}.png`;
+        if (/^\d+$/.test(trimmed)) {
+            return `odoroj/${trimmed}.png`;
+        }
         return trimmed;
     };
 
+    // Обратное преобразование: если значение имеет вид odoroj/N.png (в том числе
+    // старые записи, сохранённые ещё до перехода на короткий формат) — приводим
+    // его к простому числу N. Всё остальное (ссылки на картинки и т.п.) не трогаем.
     const shortenSmellValue = (value) => {
         if (!value) return value;
         const trimmed = value.trim();
         const match = /^odoroj\/(\d+)\.png$/.exec(trimmed);
-        return match ? match[1] : trimmed;
+        if (match) {
+            return match[1];
+        }
+        return trimmed;
     };
 
+    // Приводит src картинки к "каноническому" виду — последние 2 сегмента пути
+    // (например "odoroj/232.png" или "img/some.png"). Это нужно, чтобы сравнение
+    // с сохранённым оригиналом запаха работало одинаково независимо от того,
+    // пришёл ли src как относительный путь из HTML или как абсолютный URL, в
+    // который браузер сам превращает атрибут после присвоения через img.src.
     const canonicalizeSrc = (src) => {
         if (!src) return src;
         return src.split('/').slice(-2).join('/');
     };
 
+    let ALL_ORIGINAL_SMELLS = [];
+    // Индекс правил по имени файла запаха (последний сегмент пути), чтобы не
+    // перебирать весь список правил на каждую клетку, а сразу брать нужный кусок.
     let RULES_INDEX = new Map();
+    // Множество всех "целевых" (подменных) картинок, которые может выставить сам
+    // скрипт. По нему на каждом наведении отличаем "сейчас в DOM наша подмена"
+    // от "сейчас в DOM настоящий ванильный запах сайта" — без этого невозможно
+    // понять, можно ли доверять текущей картинке как свежему оригиналу.
     let CUSTOM_TARGET_SRCS = new Set();
 
     const loadData = () => {
         let storedData = gmGetValueSync(STORAGE_KEY, null);
+
         let rules;
         try {
             rules = storedData ? JSON.parse(storedData) : DEFAULT_RULES;
+
         } catch (e) {
-            dlog('loadData parse error: ' + e.message);
+            console.error("Возврат дефолта.", e);
             rules = DEFAULT_RULES;
         }
-        rules = rules.map(([o, p, n]) => [shortenSmellValue(o), p, shortenSmellValue(n)]);
 
+        // Приводим все правила к короткому цифровому виду (232, а не odoroj/232.png),
+        // даже если в хранилище остались старые записи в полном формате.
+        rules = rules.map(([oldSmell, phrase, newSmell]) => [
+            shortenSmellValue(oldSmell),
+            phrase,
+            shortenSmellValue(newSmell)
+        ]);
+
+        const originalSmellsSet = new Set();
         RULES_INDEX.clear();
         CUSTOM_TARGET_SRCS.clear();
 
@@ -202,108 +463,148 @@
             if (oldSmellRaw && newSmellRaw) {
                 const oldSmell = normalizeSmellValue(oldSmellRaw);
                 const newSmell = normalizeSmellValue(newSmellRaw);
+
+                const canonicalBaseSmell = oldSmell.split('/').slice(-2).join('/');
+                originalSmellsSet.add(canonicalBaseSmell);
                 CUSTOM_TARGET_SRCS.add(canonicalizeSrc(newSmell));
+
                 const fileKey = oldSmell.split('/').pop();
-                if (!RULES_INDEX.has(fileKey)) RULES_INDEX.set(fileKey, []);
-                RULES_INDEX.get(fileKey).push({ oldSmell, phraseLower: phrase.toLowerCase().trim(), newImg: newSmell });
+                if (!RULES_INDEX.has(fileKey)) {
+                    RULES_INDEX.set(fileKey, []);
+                }
+                RULES_INDEX.get(fileKey).push({
+                    oldSmell,
+                    phraseLower: phrase.toLowerCase().trim(),
+                    newImg: newSmell
+                });
             }
         });
 
-        dlog(`loadData: правил=${rules.length}, групп RULES_INDEX=${RULES_INDEX.size}`);
+        ALL_ORIGINAL_SMELLS = Array.from(originalSmellsSet);
         return rules;
     };
 
+    const saveData = (data) => {
+        gmSetValueSync(STORAGE_KEY, JSON.stringify(data));
+    };
+
+    const resetData = () => {
+        gmDeleteValueSync(STORAGE_KEY);
+    };
+
+
     const normalizeText = (text) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    // Символ считается "буквой" (частью слова), если это латиница или кириллица.
+    // Нужно, чтобы отличать целое слово/фразу от куска другого слова
+    // (например "малыш" внутри "малышка").
     const isWordChar = (ch) => !!ch && /[a-zа-яёA-ZА-ЯЁ]/.test(ch);
 
+    // Ищет фразу в тексте как отдельное слово/словосочетание, а не как
+    // произвольную подстроку. Проверяет символы до и после найденного
+    // совпадения: если хотя бы один из них — буква, значит это часть более
+    // длинного слова, и такое совпадение не засчитывается. Перебираются все
+    // вхождения фразы в тексте (через fromIndex), а не только первое —
+    // на случай если "неточное" вхождение стоит раньше "точного".
     const hasExactPhrase = (text, phrase) => {
         if (!phrase) return false;
         let fromIndex = 0;
         while (true) {
             const idx = text.indexOf(phrase, fromIndex);
             if (idx === -1) return false;
+
             const beforeChar = idx > 0 ? text[idx - 1] : '';
             const afterChar = text[idx + phrase.length] || '';
-            if (!isWordChar(beforeChar) && !isWordChar(afterChar)) return true;
+
+            if (!isWordChar(beforeChar) && !isWordChar(afterChar)) {
+                return true;
+            }
+
             fromIndex = idx + 1;
         }
     };
 
+    // normalizedText уже приведён к нижнему регистру один раз в applySmellsToCage.
+    // Среди всех подходящих правил выбирается то, у которого фраза длиннее —
+    // иначе более общая должность ("матрос") всегда перебивала бы более
+    // специфичную ("старший матрос"), если та шла раньше в тексте или просто
+    // раньше в списке правил.
     const getMatchingImage = (normalizedText, canonicalBaseSmell) => {
         const fileKey = canonicalBaseSmell.split('/').pop();
         const candidates = RULES_INDEX.get(fileKey);
-        if (!candidates) return { newSmell: null };
+        if (!candidates) return { newSmell: null, originalBase: null };
+
         let best = null;
-        for (const rule of candidates) {
+        for (let i = 0; i < candidates.length; i++) {
+            const rule = candidates[i];
             if (hasExactPhrase(normalizedText, rule.phraseLower)) {
-                if (!best || rule.phraseLower.length > best.phraseLower.length) best = rule;
+                if (!best || rule.phraseLower.length > best.phraseLower.length) {
+                    best = rule;
+                }
             }
         }
-        return best ? { newSmell: best.newImg, matchedPhrase: best.phraseLower } : { newSmell: null };
+
+        if (best) {
+            return { newSmell: best.newImg, originalBase: best.oldSmell };
+        }
+        return { newSmell: null, originalBase: null };
     };
 
     const ORIGINAL_SRC_ATTRIBUTE = 'data-original-smell';
     const CURRENT_CAT_ID_ATTRIBUTE = 'data-cat-id';
-    const seenImgElements = new WeakSet();
 
-    const applySmellsToCage = (cage, source) => {
-        try {
-            const img = cage.querySelector('img[src*="odoroj/"], img[data-original-smell]');
-            const catNameElement = cage.querySelector('a');
+    const applySmellsToCage = (cage) => {
+        const img = cage.querySelector('img[src*="odoroj/"], img[data-original-smell]');
+        const catNameElement = cage.querySelector('a');
 
-            if (!img) { dlog(`[${source}] клетка без подходящего <img> (селектор не нашёл ничего)`); return; }
-            if (!catNameElement) { dlog(`[${source}] клетка без <a> (нет имени/ссылки на кота)`); return; }
+        if (!img || !catNameElement) return;
 
-            const catUrl = catNameElement.href;
-            const idMatch = catUrl.match(/cat(\d+)/);
-            const currentCatId = idMatch ? idMatch[1] : null;
-            if (!currentCatId) { dlog(`[${source}] не нашли catId в href="${catUrl}"`); return; }
+        const catUrl = catNameElement.href;
+        const idMatch = catUrl.match(/cat(\d+)/);
+        const currentCatId = idMatch ? idMatch[1] : null;
+        if (!currentCatId) return;
 
-            if (!seenImgElements.has(img)) {
-                seenImgElements.add(img);
-                dlog(`[${source}] новая карточка: catId=${currentCatId}, img.src="${img.getAttribute('src')}"`);
-            }
+        const textContent = (cage.querySelector('span') || { innerText: '' }).innerText + ' ' + catNameElement.textContent.trim();
+        const normalizedText = normalizeText(textContent);
 
-            const textContent = (cage.querySelector('span') || { innerText: '' }).innerText + ' ' + catNameElement.textContent.trim();
-            const normalizedText = normalizeText(textContent);
+        const currentSrc = img.getAttribute('src');
+        const currentCanonical = canonicalizeSrc(currentSrc);
+        const cachedCatId = img.getAttribute(CURRENT_CAT_ID_ATTRIBUTE);
+        const isCurrentlyCustom = CUSTOM_TARGET_SRCS.has(currentCanonical);
 
-            const currentSrc = img.getAttribute('src');
-            const currentCanonical = canonicalizeSrc(currentSrc);
-            const cachedCatId = img.getAttribute(CURRENT_CAT_ID_ATTRIBUTE);
-            const isCurrentlyCustom = CUSTOM_TARGET_SRCS.has(currentCanonical);
+        let originalSrc;
 
-            let originalSrc;
-            let branch;
+        if (!isCurrentlyCustom) {
+            // Сейчас в DOM реально ванильная (не наша) картинка — это самый надёжный
+            // момент, чтобы зафиксировать её как оригинал. Перезаписываем сохранённое
+            // значение каждый раз, когда видим такую ситуацию, а не только один раз:
+            // так при смене локации/кота в этой же клетке новый настоящий запах
+            // подхватится сразу, а не будет проигнорирован из-за старого кэша.
+            originalSrc = currentSrc;
+            img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
+            img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+        } else if (cachedCatId === currentCatId && img.getAttribute(ORIGINAL_SRC_ATTRIBUTE)) {
+            // Сейчас показана наша же подмена, и кот в клетке тот же, для которого
+            // мы её и делали, — доверяем последнему зафиксированному оригиналу.
+            originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE);
+        } else {
+            // Показана какая-то подмена, но либо кот сменился, либо надёжного
+            // оригинала для него ещё нет (например DOM-нода переиспользована Vue
+            // под другого кота, и framework пока не успел сбросить src на
+            // ванильный). Без похода на сервер точно оригинал не узнать — берём
+            // текущую картинку как временный ориентир; как только сайт покажет
+            // настоящий ванильный вид, это самоисправится веткой выше.
+            originalSrc = currentSrc;
+            img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
+            img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+        }
 
-            if (!isCurrentlyCustom) {
-                originalSrc = currentSrc;
-                img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
-                img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
-                branch = 'ванильный, зафиксировали';
-            } else if (cachedCatId === currentCatId && img.getAttribute(ORIGINAL_SRC_ATTRIBUTE)) {
-                originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE);
-                branch = 'наша подмена, тот же кот, берём кэш';
-            } else {
-                originalSrc = currentSrc;
-                img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
-                img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
-                branch = 'подмена + кот сменился, временный ориентир';
-            }
+        const originalSrcPart = canonicalizeSrc(originalSrc);
+        const matchingResult = getMatchingImage(normalizedText, originalSrcPart);
+        const targetSrc = matchingResult.newSmell || originalSrc;
 
-            const originalSrcPart = canonicalizeSrc(originalSrc);
-            const matchingResult = getMatchingImage(normalizedText, originalSrcPart);
-            const targetSrc = matchingResult.newSmell || originalSrc;
-
-            const willChange = canonicalizeSrc(targetSrc) !== currentCanonical;
-
-            dlog(`[${source}] catId=${currentCatId} текст="${normalizedText}" ветка=(${branch}) ориг=${originalSrcPart} совпадение=${matchingResult.matchedPhrase || 'НЕТ'} target=${canonicalizeSrc(targetSrc)} меняем=${willChange}`);
-
-            if (willChange) {
-                img.src = targetSrc;
-                dlog(`[${source}] >>> img.src изменён на ${targetSrc}`);
-            }
-        } catch (e) {
-            dlog(`[${source}] ИСКЛЮЧЕНИЕ в applySmellsToCage: ${e.message}`);
+        if (canonicalizeSrc(targetSrc) !== currentCanonical) {
+            img.src = targetSrc;
         }
     };
 
@@ -312,26 +613,24 @@
 
         const mapContainer = document.querySelector('#ist, #cages_div');
         if (!mapContainer) {
-            dlog('initSmellObservers: контейнер #ist/#cages_div НЕ найден');
-            return;
+             return;
         }
-        dlog(`initSmellObservers: контейнер найден, id="${mapContainer.id}"`);
 
-        const allCages = document.querySelectorAll('.cage');
-        dlog(`initSmellObservers: найдено .cage элементов = ${allCages.length}`);
-        allCages.forEach(cage => applySmellsToCage(cage, 'init'));
-
+        // Вместо отдельного MutationObserver на каждую клетку (может быть сотни на
+        // карте) используем один общий наблюдатель на весь контейнер. Изменения
+        // собираются в очередь и обрабатываются одним проходом за кадр анимации,
+        // чтобы не пересчитывать всё при каждом мелком чихе DOM.
         const pendingCages = new Set();
         let flushScheduled = false;
 
         const flushPending = () => {
             flushScheduled = false;
-            const n = pendingCages.size;
             pendingCages.forEach(cage => {
-                if (cage.isConnected) applySmellsToCage(cage, 'mutation');
+                if (cage.isConnected) {
+                    applySmellsToCage(cage);
+                }
             });
             pendingCages.clear();
-            if (n > 0) dlog(`flushPending: обработано клеток = ${n}`);
         };
 
         const scheduleFlush = () => {
@@ -339,6 +638,9 @@
             flushScheduled = true;
             requestAnimationFrame(flushPending);
         };
+
+        // Первичное применение ко всем уже существующим клеткам.
+        document.querySelectorAll('.cage').forEach(cage => applySmellsToCage(cage));
 
         const mapChangeObserver = new MutationObserver((mutationsList) => {
             for (const mutation of mutationsList) {
@@ -352,10 +654,12 @@
                         }
                     });
                 }
+
                 const target = mutation.target;
                 const cage = target && target.nodeType === 1
                     ? target.closest('.cage')
                     : (target && target.parentElement ? target.parentElement.closest('.cage') : null);
+
                 if (cage) {
                     if (mutation.type === 'childList' || mutation.type === 'characterData') {
                         pendingCages.add(cage);
@@ -364,35 +668,447 @@
                     }
                 }
             }
-            if (pendingCages.size > 0) scheduleFlush();
+
+            if (pendingCages.size > 0) {
+                scheduleFlush();
+            }
         });
 
         mapChangeObserver.observe(mapContainer, {
-            childList: true, subtree: true, characterData: true,
-            attributes: true, attributeFilter: ['href']
+            childList: true,
+            subtree: true,
+            characterData: true,
+            attributes: true,
+            attributeFilter: ['href']
         });
-        dlog('MutationObserver подключён к контейнеру');
 
+        // Подстраховка на случай, если MutationObserver пропустил смену кота в клетке
+        // (Vue может патчить/переиспользовать DOM-узлы так, что наш фильтр мутаций не
+        // срабатывает). Перепроверяем запах в момент, когда курсор входит в клетку —
+        // то есть ровно тогда, когда должен открыться .cat_tooltip. Картинка меняется
+        // мгновенно, так что это незаметно.
+        //
+        // Один делегированный слушатель на весь контейнер (не по одному на клетку),
+        // плюс дедуп по lastHoveredCage — applySmellsToCage() вызывается только при
+        // переходе на новую клетку, а не на каждое микро-движение мыши внутри одной
+        // и той же клетки (где события mouseover иначе сыпались бы десятками, так как
+        // внутри .cat_tooltip много вложенных элементов).
         let lastHoveredCage = null;
-        const recheckOnEnter = (target, source) => {
+
+        const recheckOnEnter = (target) => {
             const cage = target.closest ? target.closest('.cage') : null;
-            if (!cage) {
-                dlog(`${source}: ближайшего .cage не найдено для target=${target.tagName}.${target.className}`);
-                return;
-            }
-            if (cage !== lastHoveredCage) {
+            if (cage && cage !== lastHoveredCage) {
                 lastHoveredCage = cage;
-                applySmellsToCage(cage, source);
+                applySmellsToCage(cage);
             }
         };
 
-        mapContainer.addEventListener('mouseover', (e) => recheckOnEnter(e.target, 'mouseover'), { passive: true });
-        mapContainer.addEventListener('mouseout', (e) => {
-            if (lastHoveredCage && !lastHoveredCage.contains(e.relatedTarget)) lastHoveredCage = null;
+        mapContainer.addEventListener('mouseover', (e) => {
+            recheckOnEnter(e.target);
         }, { passive: true });
-        mapContainer.addEventListener('touchstart', (e) => recheckOnEnter(e.target, 'touchstart'), { passive: true });
 
-        dlog('Слушатели mouseover/mouseout/touchstart подключены');
+        mapContainer.addEventListener('mouseout', (e) => {
+            if (lastHoveredCage && !lastHoveredCage.contains(e.relatedTarget)) {
+                lastHoveredCage = null;
+            }
+        }, { passive: true });
+
+        // На тач-устройствах тултип обычно открывается тапом, а не наведением —
+        // та же перепроверка на touchstart (дедуп тут не критичен, событие и так
+        // не «дребезжит» как mouseover).
+        mapContainer.addEventListener('touchstart', (e) => {
+            recheckOnEnter(e.target);
+        }, { passive: true });
+
+        window.smellObservers = [mapChangeObserver];
+    };
+
+
+    // --- НАСТРОЙКИ ---
+    const createSettingsInterface = () => {
+        const currentData = loadData();
+        const siteTable = document.querySelector("#site_table");
+        if (!siteTable) return;
+        const settingsContainer = siteTable.getAttribute("data-mobile") === "0"
+            ? document.querySelector("#branch")
+            : siteTable;
+        if (!settingsContainer) return;
+        const style = document.createElement('style');
+        style.innerHTML = `
+            #smell-settings-panel {
+                --sp-bg: rgba(26, 24, 23, 0.92);
+                --sp-surface: rgba(255, 255, 255, 0.035);
+                --sp-surface-hover: rgba(255, 255, 255, 0.06);
+                --sp-border: rgba(255, 255, 255, 0.08);
+                --sp-border-strong: rgba(255, 255, 255, 0.18);
+                --sp-text: #e6e2da;
+                --sp-text-muted: #938b80;
+                --sp-accent: #8fa06c;
+                --sp-accent-soft: rgba(143, 160, 108, 0.14);
+                --sp-danger: #b3695a;
+                --sp-danger-soft: rgba(179, 105, 90, 0.14);
+                --sp-radius-lg: 12px;
+                --sp-radius-sm: 6px;
+                --sp-cols: 84px 1.3fr 1fr 28px;
+
+                max-width: 820px; margin: 24px auto; padding: 20px 22px;
+                border: 1px solid var(--sp-border); border-radius: var(--sp-radius-lg);
+                background: var(--sp-bg); color: var(--sp-text);
+                font-size: 13px; line-height: 1.5;
+            }
+            #smell-settings-panel * { box-sizing: border-box; }
+
+            #smell-settings-panel .sp-header {
+                margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+            }
+            #smell-settings-panel h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--sp-text); }
+
+            #smell-settings-panel .sp-update-btn {
+                display: flex; align-items: center; gap: 6px;
+                padding: 6px 12px; border-radius: var(--sp-radius-sm);
+                border: 1px solid var(--sp-border-strong); background: rgba(255, 255, 255, 0.03);
+                color: var(--sp-text-muted); font-size: 12.5px; font-weight: 500;
+                transition: color .15s ease, border-color .15s ease, background .15s ease;
+            }
+            #smell-settings-panel .sp-update-btn:hover { color: var(--sp-text); background: var(--sp-surface-hover); border-color: var(--sp-border-strong); }
+            #smell-settings-panel .sp-update-btn:disabled { opacity: 0.7; cursor: default; }
+
+            #smell-settings-panel .column-headers {
+                display: grid; grid-template-columns: var(--sp-cols); gap: 10px;
+                padding: 0 10px 6px; font-size: 11px; font-weight: 600;
+                color: var(--sp-text-muted); border-bottom: 1px solid var(--sp-border); margin-bottom: 8px;
+            }
+
+            #smell-settings-panel .rule-section {
+                border: 1px solid var(--sp-border); border-radius: var(--sp-radius-lg);
+                background: var(--sp-surface); margin-bottom: 8px; overflow: hidden;
+            }
+            #smell-settings-panel .rule-section > summary {
+                display: flex; align-items: center; justify-content: space-between;
+                cursor: pointer; list-style: none; padding: 10px 14px; font-size: 13px; font-weight: 600;
+                transition: background .15s ease;
+            }
+            #smell-settings-panel .rule-section > summary:hover { background: var(--sp-surface-hover); }
+            #smell-settings-panel .rule-section > summary::-webkit-details-marker { display: none; }
+            #smell-settings-panel .sp-count { font-weight: 400; color: var(--sp-text-muted); font-size: 12px; }
+
+            #smell-settings-panel .section-rules { padding: 2px 14px 10px; }
+            #smell-settings-panel .rule-item {
+                display: grid; grid-template-columns: var(--sp-cols); gap: 10px; align-items: center;
+                padding: 6px 0; border-bottom: 1px solid var(--sp-border);
+            }
+            #smell-settings-panel .rule-item:last-child { border-bottom: none; }
+
+            #smell-settings-panel input {
+                width: 100%; padding: 6px 8px; border: 1px solid var(--sp-border-strong);
+                border-radius: var(--sp-radius-sm); background: rgba(0, 0, 0, 0.25);
+                color: var(--sp-text); font-size: 13px; font-family: inherit;
+            }
+            #smell-settings-panel input.old-smell, #smell-settings-panel input.image { font-variant-numeric: tabular-nums; }
+            #smell-settings-panel input::placeholder { color: var(--sp-text-muted); }
+            #smell-settings-panel input:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 1px; border-color: var(--sp-accent); }
+
+            #smell-settings-panel button { cursor: pointer; font-family: inherit; }
+            #smell-settings-panel button:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+
+            #smell-settings-panel button.row-remove {
+                width: 26px; height: 26px; border-radius: var(--sp-radius-sm); border: 1px solid transparent;
+                background: var(--sp-danger); color: #fff; font-size: 15px; line-height: 1;
+                display: flex; align-items: center; justify-content: center;
+                transition: background .15s ease, transform .1s ease;
+            }
+            #smell-settings-panel button.row-remove:hover { background: #c77a6a; }
+            #smell-settings-panel button.row-remove:active { transform: scale(0.94); }
+
+            #smell-settings-panel button.add {
+                width: 100%; margin-top: 6px; padding: 10px; border-radius: var(--sp-radius-sm);
+                border: 1px solid var(--sp-accent); background: var(--sp-accent-soft); color: var(--sp-accent);
+                font-size: 13px; font-weight: 600; transition: background .15s ease, border-color .15s ease;
+            }
+            #smell-settings-panel button.add:hover { background: var(--sp-accent); color: #1a1918; }
+
+            #smell-settings-panel .sp-footer {
+                display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+                margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--sp-border);
+            }
+            #smell-settings-panel .sp-footer-secondary { display: flex; gap: 10px; }
+
+            #smell-settings-panel button#save-settings-btn {
+                padding: 8px 18px; border-radius: var(--sp-radius-sm); border: 1px solid var(--sp-accent);
+                background: var(--sp-accent); color: #1a1918; font-size: 13px; font-weight: 600;
+            }
+            #smell-settings-panel button#save-settings-btn:hover { filter: brightness(1.08); }
+
+            #smell-settings-panel button.text-action {
+                padding: 6px 12px; border-radius: var(--sp-radius-sm); border: 1px solid var(--sp-border-strong);
+                background: rgba(255, 255, 255, 0.03); font-size: 12.5px; font-weight: 500;
+                color: var(--sp-text-muted); transition: color .15s ease, border-color .15s ease, background .15s ease;
+            }
+            #smell-settings-panel button.text-action:hover { color: var(--sp-text); border-color: var(--sp-border-strong); background: var(--sp-surface-hover); }
+            #smell-settings-panel button#delete-all-btn:hover { color: var(--sp-danger); border-color: var(--sp-danger); background: var(--sp-danger-soft); }
+
+            #smell-settings-panel .sp-footnote { margin: 14px 0 0; font-size: 11.5px; color: var(--sp-text-muted); line-height: 1.6; }
+
+            #smell-settings-panel { position: relative; }
+            #smell-settings-panel .sp-toast {
+                position: absolute; top: 20px; right: 22px; z-index: 10;
+                display: flex; align-items: center; gap: 8px;
+                padding: 9px 16px; border-radius: var(--sp-radius-sm);
+                border: 1px solid var(--sp-accent); background: #232019; color: var(--sp-text);
+                font-size: 12.5px; font-weight: 500; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+                opacity: 0; transform: translateY(-6px);
+                transition: opacity .2s ease, transform .2s ease;
+                pointer-events: none;
+            }
+            #smell-settings-panel .sp-toast.show { opacity: 1; transform: translateY(0); }
+            #smell-settings-panel .sp-toast .sp-toast-icon {
+                width: 16px; height: 16px; border-radius: 50%; flex: none;
+                background: var(--sp-accent); color: #1a1918;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 11px; font-weight: 700; line-height: 1;
+            }
+
+            @media (max-width: 520px) {
+                #smell-settings-panel .sp-toast { left: 16px; right: 16px; top: 12px; justify-content: center; }
+                #smell-settings-panel .column-headers { display: none; }
+                #smell-settings-panel .rule-item {
+                    grid-template-columns: 1fr 28px;
+                    grid-template-areas: "old rm" "phrase phrase" "img img";
+                    row-gap: 6px; padding: 10px 0;
+                }
+                #smell-settings-panel .rule-item .old-smell { grid-area: old; }
+                #smell-settings-panel .rule-item .row-remove { grid-area: rm; justify-self: end; }
+                #smell-settings-panel .rule-item .phrase { grid-area: phrase; }
+                #smell-settings-panel .rule-item .image { grid-area: img; }
+            }
+        `;
+        document.head.appendChild(style);
+        const panel = document.createElement('div');
+        panel.id = 'smell-settings-panel';
+        panel.innerHTML = `
+            <div class="sp-toast" id="sp-toast" role="status" aria-live="polite">
+                <span class="sp-toast-icon">✓</span>
+                <span class="sp-toast-text">Сохранено</span>
+            </div>
+            <div class="sp-header">
+                <h3>Настройка запахов</h3>
+                <button id="check-update-btn" class="sp-update-btn" type="button">
+                    <span class="sp-update-label">Проверить обновление</span>
+                </button>
+            </div>
+            <div id="smell-list-content">
+                <div class="column-headers">
+                    <div>Исходный</div>
+                    <div>Должность</div>
+                    <div>Новый запах</div>
+                    <div></div>
+                </div>
+                <div id="rule-list"></div>
+                <button id="add-rule-btn" class="add" type="button">+ Добавить запах</button>
+            </div>
+            <div class="sp-footer">
+                <button id="save-settings-btn" type="button">Сохранить</button>
+                <div class="sp-footer-secondary">
+                    <button id="reset-settings-btn" class="text-action" type="button">Сбросить на дефолтные</button>
+                    <button id="delete-all-btn" class="text-action" type="button">Удалить все</button>
+                </div>
+            </div>
+            <p class="sp-footnote">
+                Можно указывать как должности, так и имена. В поле запаха достаточно ввести id (например 403) —
+                путь odoroj/403.png соберётся автоматически; если это не число (например ссылка на картинку),
+                значение используется как есть.
+            </p>
+        `;
+        const targetElement = document.querySelector('a[href="del"]');
+        if (targetElement) {
+            targetElement.insertAdjacentElement('afterend', panel);
+        } else {
+            settingsContainer.appendChild(panel);
+        }
+        const ruleList = panel.querySelector('#rule-list');
+        const saveBtn = panel.querySelector('#save-settings-btn');
+        const resetBtn = panel.querySelector('#reset-settings-btn');
+        const deleteAllBtn = panel.querySelector('#delete-all-btn');
+        const addBtn = panel.querySelector('#add-rule-btn');
+        // Сопоставление правила из DEFAULT_CATEGORIES с его категорией для группировки
+        // в панели настроек. Ключ строится по нормализованным значениям (через
+        // normalizeSmellValue), чтобы старые сохранённые правила в формате
+        // odoroj/232.png так же находили свою категорию, как и новые в формате 232.
+        const categoryKey = (oldSmell, phrase, image) =>
+            `${normalizeSmellValue(oldSmell)}|||${phrase}|||${normalizeSmellValue(image)}`;
+
+        const CATEGORY_LOOKUP = new Map();
+        DEFAULT_CATEGORIES.forEach(cat => {
+            cat.rules.forEach(([oldSmell, phrase, image]) => {
+                CATEGORY_LOOKUP.set(categoryKey(oldSmell, phrase, image), cat.name);
+            });
+        });
+
+        const groupRulesByCategory = (data) => {
+            const buckets = new Map();
+            DEFAULT_CATEGORIES.forEach(cat => buckets.set(cat.name, []));
+            buckets.set('Другое', []);
+
+            data.forEach(rule => {
+                const [oldSmell, phrase, image] = rule;
+                const key = categoryKey(oldSmell, phrase, image);
+                const catName = CATEGORY_LOOKUP.get(key) || 'Другое';
+                buckets.get(catName).push(rule);
+            });
+
+            const result = [];
+            DEFAULT_CATEGORIES.forEach(cat => {
+                const items = buckets.get(cat.name);
+                if (items.length > 0) result.push({ name: cat.name, items });
+            });
+            const other = buckets.get('Другое');
+            if (other.length > 0) result.push({ name: 'Другое', items: other });
+            return result;
+        };
+
+        const renderRules = (data, openSectionNames = null) => {
+            ruleList.innerHTML = '';
+            const grouped = groupRulesByCategory(data);
+
+            grouped.forEach(section => {
+                const details = document.createElement('details');
+                details.className = 'rule-section';
+                details.dataset.sectionName = section.name;
+                if (openSectionNames && openSectionNames.has(section.name)) {
+                    details.open = true;
+                }
+
+                const summary = document.createElement('summary');
+                summary.innerHTML = `
+                    <span>${section.name}</span>
+                    <span class="sp-count">${section.items.length}</span>
+                `;
+                details.appendChild(summary);
+
+                const sectionRules = document.createElement('div');
+                sectionRules.className = 'section-rules';
+
+                section.items.forEach(([oldSmell, phrase, image]) => {
+                    const item = document.createElement('div');
+                    item.className = 'rule-item';
+                    item.innerHTML = `
+                        <input type="text" class="old-smell" value="${oldSmell}" placeholder="403" aria-label="Исходный запах">
+                        <input type="text" class="phrase" value="${phrase}" placeholder="Название должности или имя" aria-label="Должность или имя">
+                        <input type="text" class="image" value="${image}" placeholder="456 или ссылка на картинку" aria-label="Новый запах">
+                        <button class="row-remove" type="button" aria-label="Удалить строку">×</button>
+                    `;
+                    sectionRules.appendChild(item);
+                });
+
+                details.appendChild(sectionRules);
+                ruleList.appendChild(details);
+            });
+        };
+        const collectData = () => {
+            const data = [];
+            panel.querySelectorAll('.rule-item').forEach(item => {
+                const oldSmell = item.querySelector('.old-smell').value.trim();
+                const phrase = item.querySelector('.phrase').value.trim();
+                const image = item.querySelector('.image').value.trim();
+                if (oldSmell && phrase && image) data.push([oldSmell, phrase, image]);
+            });
+            return data;
+        };
+
+        // Какие секции сейчас раскрыты, чтобы не сворачивать их пользователю
+        // при перерисовке списка (например после удаления строки).
+        const getOpenSectionNames = () => {
+            const open = new Set();
+            ruleList.querySelectorAll('.rule-section[open]').forEach(details => {
+                open.add(details.dataset.sectionName);
+            });
+            return open;
+        };
+
+        // Ненавязчивая подсказка вместо alert/confirm: показывается на пару секунд
+        // в правом верхнем углу панели и сама плавно скрывается.
+        const toast = panel.querySelector('#sp-toast');
+        const toastText = toast.querySelector('.sp-toast-text');
+        let toastHideTimer = null;
+        const showToast = (message) => {
+            toastText.textContent = message;
+            clearTimeout(toastHideTimer);
+            toast.classList.add('show');
+            toastHideTimer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2200);
+        };
+
+        addBtn.onclick = () => {
+            const newData = collectData();
+            newData.push(["", "", ""]);
+            const openSections = getOpenSectionNames();
+            openSections.add('Другое');
+            renderRules(newData, openSections);
+        };
+        ruleList.onclick = (e) => {
+            if (e.target.closest('.row-remove')) {
+                e.target.closest('.rule-item').remove();
+                // Перерисовываем весь список: так счётчик строк в заголовке секции
+                // обновляется сразу, а опустевшая секция пропадает, а не остаётся
+                // висеть пустой оболочкой.
+                renderRules(collectData(), getOpenSectionNames());
+            }
+        };
+        saveBtn.onclick = () => {
+            const dataToSave = collectData();
+            saveData(dataToSave);
+            showToast('Сохранено');
+        };
+        resetBtn.onclick = () => {
+            if (confirm("Сбросить запахи на дефолтные?")) {
+                resetData();
+                renderRules(DEFAULT_RULES);
+                showToast('Сброшено на дефолтные');
+            }
+        };
+        deleteAllBtn.onclick = () => {
+            if (!confirm("Удалить все запахи без возможности отмены (кроме повторного добавления вручную)?")) return;
+            renderRules([]);
+            gmSetValueSync(STORAGE_KEY, "[]");
+            showToast('Все запахи удалены');
+        };
+
+        const updateBtn = panel.querySelector('#check-update-btn');
+        const updateLabel = updateBtn.querySelector('.sp-update-label');
+        const currentVersion = (typeof GM_info === 'object' && GM_info.script && GM_info.script.version)
+            ? GM_info.script.version
+            : null;
+
+        updateBtn.onclick = () => {
+            if (updateBtn.disabled) return;
+            updateBtn.disabled = true;
+            updateLabel.textContent = 'Проверяем...';
+
+            fetchRemoteVersion()
+                .then((remoteVersion) => {
+                    if (!currentVersion) {
+                        showToast(`Актуальная версия: ${remoteVersion}`);
+                        return;
+                    }
+                    if (isVersionNewer(remoteVersion, currentVersion)) {
+                        showToast(`Найдено обновление v${remoteVersion}, открываю установку...`);
+                        setTimeout(() => openUrlInNewTab(DOWNLOAD_URL), 600);
+                    } else {
+                        showToast('У вас последняя версия');
+                    }
+                })
+                .catch((err) => {
+                    console.error('Проверка обновлений не удалась.', err);
+                    showToast('Не удалось проверить обновление');
+                })
+                .finally(() => {
+                    updateBtn.disabled = false;
+                    updateLabel.textContent = 'Проверить обновление';
+                });
+        };
+
+        renderRules(currentData);
     };
 
     const waitForElement = (selector) => new Promise(resolve => {
@@ -400,23 +1116,17 @@
         if (element) return resolve(element);
         const observer = new MutationObserver((_, obs) => {
             const el = document.querySelector(selector);
-            if (el) { obs.disconnect(); resolve(el); }
+            if (el) {
+                obs.disconnect();
+                resolve(el);
+            }
         });
         observer.observe(document.body, { childList: true, subtree: true });
     });
 
-    createDebugPanel();
-    dlog(`Скрипт загружен. path=${window.location.pathname}, UA=${navigator.userAgent}`);
-
     if (window.location.pathname.endsWith('/settings')) {
-        dlog('Страница /settings — отладочная сборка не рендерит панель настроек, только диагностику карты.');
+        waitForElement('#site_table').then(createSettingsInterface);
     } else if (document.querySelector('#main_table')) {
-        dlog('#main_table найден, ждём #ist/#cages_div...');
-        waitForElement('#ist, #cages_div').then((el) => {
-            dlog(`#ist/#cages_div появился: id="${el.id}"`);
-            initSmellObservers();
-        });
-    } else {
-        dlog('#main_table НЕ найден на этой странице — initSmellObservers не запускается.');
+        waitForElement('#ist, #cages_div').then(initSmellObservers);
     }
 })();
