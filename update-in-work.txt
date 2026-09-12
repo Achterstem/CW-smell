@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CW smell
 // @namespace    http://tampermonkey.net/
-// @version      1.0.17
+// @version      1.1.11
 // @description  Меняет запахи по исходному запаху + по имени/статусу/должности.
 // @author       achterstem
 // @match        http*://*.catwar.net/*
@@ -73,8 +73,6 @@
         window.open(url, '_blank');
     };
 
-    // Сравнение версий вида "1.0.15" по числовым сегментам (а не по строке
-    // целиком), чтобы, например, "1.0.9" считалась ниже "1.0.10".
     const isVersionNewer = (remote, local) => {
         const toParts = (v) => String(v).trim().split('.').map(n => parseInt(n, 10) || 0);
         const remoteParts = toParts(remote);
@@ -94,9 +92,6 @@
         return match ? match[1] : null;
     };
 
-    // Запрашивает актуальный текст скрипта из репозитория и достаёт из него
-    // @version. GM_xmlhttpRequest нужен вместо fetch, так как обычный fetch
-    // упрётся в CORS на GitHub из контекста страницы catwar.
     const fetchRemoteVersion = () => new Promise((resolve, reject) => {
         if (typeof GM_xmlhttpRequest !== 'function') {
             reject(new Error('GM_xmlhttpRequest недоступен'));
@@ -379,20 +374,13 @@
         },
     ];
 
-    // Правила ниже раньше жили в отдельной категории 'Мои тесты' в панели
-    // настроек. Теперь это обычные пользовательские правила по умолчанию —
-    // они не регистрируются в CATEGORY_LOOKUP, поэтому попадают в общую
-    // группу 'Другое', как и любые правила, добавленные вручную.
     const EXTRA_DEFAULT_RULES = [
-        ['403', 'Гильотина', 'https://raw.githubusercontent.com/Achterstem/host/refs/heads/main/img/zpkh.png'],
-        ['403', 'Чёрт, Фраудхарт', 'https://raw.githubusercontent.com/Achterstem/host/refs/heads/main/img/zpkh.png'],
+        ['222', 'Лоботомия', 'https://achterstem.github.io/host/img/zpkh.png'],
+        ['222', 'Грозный', 'https://achterstem.github.io/host/img/zpkh.png'],
     ];
 
     const DEFAULT_RULES = DEFAULT_CATEGORIES.reduce((acc, cat) => acc.concat(cat.rules), []).concat(EXTRA_DEFAULT_RULES);
 
-    // Позволяет вводить в настройках просто id запаха (цифры), тогда путь
-    // соберётся автоматически как odoroj/<id>.png. Если введено что-то ещё
-    // (например полная ссылка на картинку) — используется как есть, без изменений.
     const normalizeSmellValue = (value) => {
         if (!value) return value;
         const trimmed = value.trim();
@@ -402,9 +390,6 @@
         return trimmed;
     };
 
-    // Обратное преобразование: если значение имеет вид odoroj/N.png (в том числе
-    // старые записи, сохранённые ещё до перехода на короткий формат) — приводим
-    // его к простому числу N. Всё остальное (ссылки на картинки и т.п.) не трогаем.
     const shortenSmellValue = (value) => {
         if (!value) return value;
         const trimmed = value.trim();
@@ -415,25 +400,14 @@
         return trimmed;
     };
 
-    // Приводит src картинки к "каноническому" виду — последние 2 сегмента пути
-    // (например "odoroj/232.png" или "img/some.png"). Это нужно, чтобы сравнение
-    // с сохранённым оригиналом запаха работало одинаково независимо от того,
-    // пришёл ли src как относительный путь из HTML или как абсолютный URL, в
-    // который браузер сам превращает атрибут после присвоения через img.src.
     const canonicalizeSrc = (src) => {
         if (!src) return src;
         return src.split('/').slice(-2).join('/');
     };
 
     let ALL_ORIGINAL_SMELLS = [];
-    // Индекс правил по имени файла запаха (последний сегмент пути), чтобы не
-    // перебирать весь список правил на каждую клетку, а сразу брать нужный кусок.
+    let CUSTOM_TO_BASE_SMELL_MAP = new Map();
     let RULES_INDEX = new Map();
-    // Множество всех "целевых" (подменных) картинок, которые может выставить сам
-    // скрипт. По нему на каждом наведении отличаем "сейчас в DOM наша подмена"
-    // от "сейчас в DOM настоящий ванильный запах сайта" — без этого невозможно
-    // понять, можно ли доверять текущей картинке как свежему оригиналу.
-    let CUSTOM_TARGET_SRCS = new Set();
 
     const loadData = () => {
         let storedData = gmGetValueSync(STORAGE_KEY, null);
@@ -447,8 +421,6 @@
             rules = DEFAULT_RULES;
         }
 
-        // Приводим все правила к короткому цифровому виду (232, а не odoroj/232.png),
-        // даже если в хранилище остались старые записи в полном формате.
         rules = rules.map(([oldSmell, phrase, newSmell]) => [
             shortenSmellValue(oldSmell),
             phrase,
@@ -456,8 +428,8 @@
         ]);
 
         const originalSmellsSet = new Set();
+        CUSTOM_TO_BASE_SMELL_MAP.clear();
         RULES_INDEX.clear();
-        CUSTOM_TARGET_SRCS.clear();
 
         rules.forEach(([oldSmellRaw, phrase, newSmellRaw]) => {
             if (oldSmellRaw && newSmellRaw) {
@@ -466,7 +438,8 @@
 
                 const canonicalBaseSmell = oldSmell.split('/').slice(-2).join('/');
                 originalSmellsSet.add(canonicalBaseSmell);
-                CUSTOM_TARGET_SRCS.add(canonicalizeSrc(newSmell));
+
+                CUSTOM_TO_BASE_SMELL_MAP.set(canonicalizeSrc(newSmell), oldSmell);
 
                 const fileKey = oldSmell.split('/').pop();
                 if (!RULES_INDEX.has(fileKey)) {
@@ -494,18 +467,7 @@
 
 
     const normalizeText = (text) => text.toLowerCase().replace(/\s+/g, ' ').trim();
-
-    // Символ считается "буквой" (частью слова), если это латиница или кириллица.
-    // Нужно, чтобы отличать целое слово/фразу от куска другого слова
-    // (например "малыш" внутри "малышка").
     const isWordChar = (ch) => !!ch && /[a-zа-яёA-ZА-ЯЁ]/.test(ch);
-
-    // Ищет фразу в тексте как отдельное слово/словосочетание, а не как
-    // произвольную подстроку. Проверяет символы до и после найденного
-    // совпадения: если хотя бы один из них — буква, значит это часть более
-    // длинного слова, и такое совпадение не засчитывается. Перебираются все
-    // вхождения фразы в тексте (через fromIndex), а не только первое —
-    // на случай если "неточное" вхождение стоит раньше "точного".
     const hasExactPhrase = (text, phrase) => {
         if (!phrase) return false;
         let fromIndex = 0;
@@ -524,11 +486,6 @@
         }
     };
 
-    // normalizedText уже приведён к нижнему регистру один раз в applySmellsToCage.
-    // Среди всех подходящих правил выбирается то, у которого фраза длиннее —
-    // иначе более общая должность ("матрос") всегда перебивала бы более
-    // специфичную ("старший матрос"), если та шла раньше в тексте или просто
-    // раньше в списке правил.
     const getMatchingImage = (normalizedText, canonicalBaseSmell) => {
         const fileKey = canonicalBaseSmell.split('/').pop();
         const candidates = RULES_INDEX.get(fileKey);
@@ -559,51 +516,60 @@
 
         if (!img || !catNameElement) return;
 
-        const catUrl = catNameElement.href;
-        const idMatch = catUrl.match(/cat(\d+)/);
-        const currentCatId = idMatch ? idMatch[1] : null;
-        if (!currentCatId) return;
-
+        let currentFullRelativeSrc = img.getAttribute('src');
+        const currentCanonicalSrc = canonicalizeSrc(currentFullRelativeSrc);
         const textContent = (cage.querySelector('span') || { innerText: '' }).innerText + ' ' + catNameElement.textContent.trim();
         const normalizedText = normalizeText(textContent);
 
-        const currentSrc = img.getAttribute('src');
-        const currentCanonical = canonicalizeSrc(currentSrc);
+        const catUrl = catNameElement.href;
+        const match = catUrl.match(/cat(\d+)/);
+        const currentCatId = match ? match[1] : null;
         const cachedCatId = img.getAttribute(CURRENT_CAT_ID_ATTRIBUTE);
-        const isCurrentlyCustom = CUSTOM_TARGET_SRCS.has(currentCanonical);
 
-        let originalSrc;
+        const hasCustomSrc = CUSTOM_TO_BASE_SMELL_MAP.has(currentCanonicalSrc);
 
-        if (!isCurrentlyCustom) {
-            // Сейчас в DOM реально ванильная (не наша) картинка — это самый надёжный
-            // момент, чтобы зафиксировать её как оригинал. Перезаписываем сохранённое
-            // значение каждый раз, когда видим такую ситуацию, а не только один раз:
-            // так при смене локации/кота в этой же клетке новый настоящий запах
-            // подхватится сразу, а не будет проигнорирован из-за старого кэша.
-            originalSrc = currentSrc;
-            img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
-            img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
-        } else if (cachedCatId === currentCatId && img.getAttribute(ORIGINAL_SRC_ATTRIBUTE)) {
-            // Сейчас показана наша же подмена, и кот в клетке тот же, для которого
-            // мы её и делали, — доверяем последнему зафиксированному оригиналу.
-            originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE);
-        } else {
-            // Показана какая-то подмена, но либо кот сменился, либо надёжного
-            // оригинала для него ещё нет (например DOM-нода переиспользована Vue
-            // под другого кота, и framework пока не успел сбросить src на
-            // ванильный). Без похода на сервер точно оригинал не узнать — берём
-            // текущую картинку как временный ориентир; как только сайт покажет
-            // настоящий ванильный вид, это самоисправится веткой выше.
-            originalSrc = currentSrc;
-            img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
-            img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+
+        let originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE);
+
+        if (!originalSrc) {
+             originalSrc = currentFullRelativeSrc;
+             img.setAttribute(ORIGINAL_SRC_ATTRIBUTE, originalSrc);
+             img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+
+        } else if (currentCatId !== cachedCatId) {
+             if (hasCustomSrc) {
+                 img.src = originalSrc;
+                 currentFullRelativeSrc = originalSrc;
+             }
+
+             img.removeAttribute(ORIGINAL_SRC_ATTRIBUTE);
+
+             img.setAttribute(CURRENT_CAT_ID_ATTRIBUTE, currentCatId);
+             return applySmellsToCage(cage);
+
+        } else if (hasCustomSrc) {
+             const baseSmellForCustom = CUSTOM_TO_BASE_SMELL_MAP.get(currentCanonicalSrc);
+             const matchingResult = getMatchingImage(normalizedText, baseSmellForCustom);
+
+             if (!matchingResult.newSmell || canonicalizeSrc(matchingResult.newSmell) !== currentCanonicalSrc) {
+                 img.src = originalSrc;
+                 currentFullRelativeSrc = originalSrc;
+             }
         }
 
-        const originalSrcPart = canonicalizeSrc(originalSrc);
-        const matchingResult = getMatchingImage(normalizedText, originalSrcPart);
-        const targetSrc = matchingResult.newSmell || originalSrc;
+        originalSrc = img.getAttribute(ORIGINAL_SRC_ATTRIBUTE) || currentFullRelativeSrc;
 
-        if (canonicalizeSrc(targetSrc) !== currentCanonical) {
+        const originalSrcPart = canonicalizeSrc(originalSrc);
+
+        const matchingResult = getMatchingImage(normalizedText, originalSrcPart);
+
+        let targetSrc = originalSrc;
+
+        if (matchingResult.newSmell) {
+            targetSrc = matchingResult.newSmell;
+        }
+
+        if (targetSrc && canonicalizeSrc(targetSrc) !== canonicalizeSrc(img.getAttribute('src'))) {
             img.src = targetSrc;
         }
     };
@@ -616,10 +582,6 @@
              return;
         }
 
-        // Вместо отдельного MutationObserver на каждую клетку (может быть сотни на
-        // карте) используем один общий наблюдатель на весь контейнер. Изменения
-        // собираются в очередь и обрабатываются одним проходом за кадр анимации,
-        // чтобы не пересчитывать всё при каждом мелком чихе DOM.
         const pendingCages = new Set();
         let flushScheduled = false;
 
@@ -639,7 +601,6 @@
             requestAnimationFrame(flushPending);
         };
 
-        // Первичное применение ко всем уже существующим клеткам.
         document.querySelectorAll('.cage').forEach(cage => applySmellsToCage(cage));
 
         const mapChangeObserver = new MutationObserver((mutationsList) => {
@@ -682,17 +643,6 @@
             attributeFilter: ['href']
         });
 
-        // Подстраховка на случай, если MutationObserver пропустил смену кота в клетке
-        // (Vue может патчить/переиспользовать DOM-узлы так, что наш фильтр мутаций не
-        // срабатывает). Перепроверяем запах в момент, когда курсор входит в клетку —
-        // то есть ровно тогда, когда должен открыться .cat_tooltip. Картинка меняется
-        // мгновенно, так что это незаметно.
-        //
-        // Один делегированный слушатель на весь контейнер (не по одному на клетку),
-        // плюс дедуп по lastHoveredCage — applySmellsToCage() вызывается только при
-        // переходе на новую клетку, а не на каждое микро-движение мыши внутри одной
-        // и той же клетки (где события mouseover иначе сыпались бы десятками, так как
-        // внутри .cat_tooltip много вложенных элементов).
         let lastHoveredCage = null;
 
         const recheckOnEnter = (target) => {
@@ -898,7 +848,7 @@
             </div>
             <div id="smell-list-content">
                 <div class="column-headers">
-                    <div>Исходный</div>
+                    <div>Запах</div>
                     <div>Должность</div>
                     <div>Новый запах</div>
                     <div></div>
@@ -914,9 +864,7 @@
                 </div>
             </div>
             <p class="sp-footnote">
-                Можно указывать как должности, так и имена. В поле запаха достаточно ввести id (например 403) —
-                путь odoroj/403.png соберётся автоматически; если это не число (например ссылка на картинку),
-                значение используется как есть.
+                Может иногда не срабатывать, при повторном наведении перечитывает данные.
             </p>
         `;
         const targetElement = document.querySelector('a[href="del"]');
@@ -930,10 +878,6 @@
         const resetBtn = panel.querySelector('#reset-settings-btn');
         const deleteAllBtn = panel.querySelector('#delete-all-btn');
         const addBtn = panel.querySelector('#add-rule-btn');
-        // Сопоставление правила из DEFAULT_CATEGORIES с его категорией для группировки
-        // в панели настроек. Ключ строится по нормализованным значениям (через
-        // normalizeSmellValue), чтобы старые сохранённые правила в формате
-        // odoroj/232.png так же находили свою категорию, как и новые в формате 232.
         const categoryKey = (oldSmell, phrase, image) =>
             `${normalizeSmellValue(oldSmell)}|||${phrase}|||${normalizeSmellValue(image)}`;
 
@@ -992,10 +936,10 @@
                     const item = document.createElement('div');
                     item.className = 'rule-item';
                     item.innerHTML = `
-                        <input type="text" class="old-smell" value="${oldSmell}" placeholder="403" aria-label="Исходный запах">
-                        <input type="text" class="phrase" value="${phrase}" placeholder="Название должности или имя" aria-label="Должность или имя">
-                        <input type="text" class="image" value="${image}" placeholder="456 или ссылка на картинку" aria-label="Новый запах">
-                        <button class="row-remove" type="button" aria-label="Удалить строку">×</button>
+                        <input type="text" class="old-smell" value="${oldSmell}" placeholder="запах" aria-label="запах">
+                        <input type="text" class="phrase" value="${phrase}" placeholder="должность или имя" aria-label="должность или имя">
+                        <input type="text" class="image" value="${image}" placeholder="новый запах" aria-label="новый запах">
+                        <button class="row-remove" type="button" aria-label="Удалить">×</button>
                     `;
                     sectionRules.appendChild(item);
                 });
@@ -1015,8 +959,6 @@
             return data;
         };
 
-        // Какие секции сейчас раскрыты, чтобы не сворачивать их пользователю
-        // при перерисовке списка (например после удаления строки).
         const getOpenSectionNames = () => {
             const open = new Set();
             ruleList.querySelectorAll('.rule-section[open]').forEach(details => {
@@ -1025,8 +967,6 @@
             return open;
         };
 
-        // Ненавязчивая подсказка вместо alert/confirm: показывается на пару секунд
-        // в правом верхнем углу панели и сама плавно скрывается.
         const toast = panel.querySelector('#sp-toast');
         const toastText = toast.querySelector('.sp-toast-text');
         let toastHideTimer = null;
@@ -1049,9 +989,6 @@
         ruleList.onclick = (e) => {
             if (e.target.closest('.row-remove')) {
                 e.target.closest('.rule-item').remove();
-                // Перерисовываем весь список: так счётчик строк в заголовке секции
-                // обновляется сразу, а опустевшая секция пропадает, а не остаётся
-                // висеть пустой оболочкой.
                 renderRules(collectData(), getOpenSectionNames());
             }
         };
